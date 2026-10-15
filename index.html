@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#120f1f">
 <title>夜市彈珠台</title>
-<link rel="preload" href="vendor/phaser.min.js?v=20261015231835" as="script">
+<link rel="preload" href="vendor/phaser.min.js?v=20261016000936" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
@@ -64,9 +64,9 @@
 // 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
 // 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
 // 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
-// 版本號：發佈腳本會把 20261015231835 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
+// 版本號：發佈腳本會把 20261016000936 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261015231835', DEV = VER.indexOf('__') === 0;
+  var VER = '20261016000936', DEV = VER.indexOf('__') === 0;
   document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
 
   // ── 紀錄 ──
@@ -112,15 +112,16 @@
   };
 
   // ── 線上排行榜（Cloudflare Workers＋D1，使用者的免費方案）：連不上就只用手機紀錄，不擋遊戲 ──
-  var API = 'https://nm-pinball-api.quiet-notes-7k2.workers.dev';
+  // 測試一律送到測試用排行榜（2026-10-15 使用者同意另開）：本機版、網址帶 ?staging、自動化瀏覽器（navigator.webdriver）
+  var STAGING = DEV || /[?&]staging\b/.test(location.search) || !!navigator.webdriver;
+  var API = STAGING ? 'https://nm-pinball-api-staging.quiet-notes-7k2.workers.dev' : 'https://nm-pinball-api.quiet-notes-7k2.workers.dev';
   function cloud(path, body) {
     var ctl = window.AbortController ? new AbortController() : null; if (ctl) setTimeout(function () { ctl.abort(); }, 6000);
     return fetch(API + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctl && ctl.signal } : { signal: ctl && ctl.signal })
       .then(function (r) { return r.json(); });
   }
   window.NM_cloud = {
-    // 本機測試版（dev）不上傳，免得測試分數混進排行榜（2026-10-15 自動試玩誤傳了 12 筆）
-    submit: function (name, score) { if (DEV) return Promise.resolve(null); return cloud('/score', { name: name, score: score, ver: VER, mode: window.NM_mode || 'free' }).then(function (d) { if (d && d.today) drawBoard(d); return d; }); },
+    submit: function (name, score) { return cloud('/score', { name: name, score: score, ver: VER, mode: window.NM_mode || 'free' }).then(function (d) { if (d && d.today) drawBoard(d); return d; }); },
     top: function () { return cloud('/top').then(function (d) { drawBoard(d); return d; }); },
   };
   function drawBoard(d) {
