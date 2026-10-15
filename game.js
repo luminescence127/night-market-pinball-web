@@ -20,8 +20,9 @@
   const BONUS_POCKET = 100, BONUS_MAX = 8;        // F1 獎勵球：進 100 分洞送 1 顆，一局最多送 8 顆
   const COMBO_WINDOW = 2500;                      // F5 連擊：上一顆進洞後 2.5 秒內再進洞算連擊
   const COMBO_MIN = 50;
-  const COMBO_MULT = [1, 2, 2, 3];                // 第 n 次連擊的倍數（第 1 顆 ×1、第 2～3 顆 ×2、第 4 顆起 ×3）
-  const FEVER_TIME = 10000, FEVER_MULT = 2;       // F6 老闆加碼：每局一次、10 秒內分數 ×2
+  // 加成一律「相加」不相乘（2026-10-15 使用者：同樣打法 1,100～8,350 分，「這機率真的很鬼」；相乘時珍珠×連擊×加碼最高 ×12）
+  const COMBO_EXTRA = [0, 0.5, 0.5, 1];           // 第 n 次連擊多加的倍數（第 1 顆 +0、第 2～3 顆 +0.5、第 4 顆起 +1）
+  const FEVER_TIME = 10000, FEVER_EXTRA = 1;      // F6 老闆加碼：每局一次、10 秒內倍數 +1
   const FEVER_FROM = 4, FEVER_TO = 10;            // 在第幾顆到第幾顆之間隨機出現
   // F3 攤位任務：每局隨機一個小目標，完成 +TASK_REWARD
   const TASK_REWARD = 300;
@@ -44,6 +45,7 @@
   const PEG_BOUNCE = 0;          // Matter 的彈性取兩者較大值：釘子設 0，球照自己的彈性彈
   const JITTER = 2;              // 放球時隨機偏移幾像素：約七成可預測、三成混沌
   const DROP_COOLDOWN = 220;     // 毫秒
+  const MAX_ON_BOARD = 3;        // 台面上同時最多幾顆（2026-10-15：一口氣連丟比慢慢瞄準還高分，運氣成分太重）
   const AIR = 0.0006;             // 空氣阻力（每一步；每秒約剩九成，跟 Godot 預設差不多）
 
   // ── 互動教學：第一次玩自動開始，開始畫面也能重看。一步一個動作，做到了才進下一步 ──
@@ -342,6 +344,7 @@
     // ───────────── 遊戲流程 ─────────────
     dropBall() {
       if (this.ballsLeft <= 0 || this.time.now - this.lastDrop < DROP_COOLDOWN) return;
+      if (this.balls.length >= MAX_ON_BOARD && !this.tut) { this.floatText('台上最多 ' + MAX_ON_BOARD + ' 顆', this.dropX, DROP_Y + 40, 0x8f86b3, 26); return; }
       if (this.ballType === 'iron') { if (this.ironLeft <= 0) return; this.ironLeft--; }
       this.lastDrop = this.time.now;
       this.ballsLeft--;
@@ -416,9 +419,11 @@
       if (POCKETS[index] < COMBO_MIN) this.combo = 0;
       else this.combo = this.combo > 0 && this.clock - this.lastPocketAt <= COMBO_WINDOW ? this.combo + 1 : 1;
       this.lastPocketAt = this.clock;
-      const comboMult = this.combo > 0 ? COMBO_MULT[Math.min(this.combo, COMBO_MULT.length) - 1] : 1;
-      const fever = this.feverLeft > 0 ? FEVER_MULT : 1;
-      const points = POCKETS[index] * info.mult * comboMult * fever;
+      const comboExtra = this.combo > 0 ? COMBO_EXTRA[Math.min(this.combo, COMBO_EXTRA.length) - 1] : 0;
+      const feverExtra = this.feverLeft > 0 ? FEVER_EXTRA : 0;
+      const mult = info.mult + comboExtra + feverExtra;   // 最高：珍珠 2＋連擊 1＋加碼 1 = ×4
+      const points = Math.round(POCKETS[index] * mult / 5) * 5;
+      const comboMult = comboExtra > 0 ? 2 : 1;   // 給下面的音效用
       this.score += points;
       this.history.push({ type: ball.type, points: points + ball.pts });
       this.pocketFlash[index] = 1;
@@ -428,7 +433,7 @@
       this.removeBall(ball);
       const color = C.pockets[index];
       this.burst(x, y, color, 14 + Math.floor(points / 4));
-      const tags = (info.mult > 1 ? '珍珠×2 ' : '') + (comboMult > 1 ? '連擊×' + comboMult + ' ' : '') + (fever > 1 ? '加碼×2' : '');
+      const tags = mult > 1 ? '×' + mult + (comboExtra ? ' 連擊' : '') + (feverExtra ? ' 加碼' : '') : '';
       this.floatText('+' + points + (tags ? '\n' + tags.trim() : ''), x, y - 40, color, 34 + Math.min(points, 200) / 6);
       if (comboMult > 1) Sound.play('ding', 1 + this.combo * 0.12, -4);
       if (ball.type === 'pearl' && POCKETS[index] === 100) this.addStat('pearl100', 1);
