@@ -1,6 +1,6 @@
 // 夜市彈珠台（網頁版，Phaser 3.90 + 內建 Matter.js 物理，都是 MIT）。
 // 2026-10-15 從 Godot 版（scripts/main.gd）照搬：Godot 網頁版 43 MB，iPhone 4G 打不開，使用者選「改用 Phaser 重寫」。
-// 玩法：先選彈珠，手指左右滑（或滑鼠移動）選落點，點一下放球；球撞釘子掉進底部的洞得分，15 顆用完一局結束（進 100 分洞送一顆、連擊加倍、老闆加碼時間）。
+// 玩法：先選彈珠，手指按住左右拖動（或滑鼠移動）選落點，放開放球；球撞釘子掉進底部的洞得分，15 顆用完一局結束（進 100 分洞送一顆、連擊加倍、老闆加碼時間）。
 // 3 種彈珠（外觀＝玩法）：
 //   珍珠：Q 彈、最亂，進洞分數 ×2。
 //   麻糬：碰到釘子會黏住一下，每黏一次 +5 分。
@@ -45,6 +45,32 @@
   const JITTER = 2;              // 放球時隨機偏移幾像素：約七成可預測、三成混沌
   const DROP_COOLDOWN = 220;     // 毫秒
   const AIR = 0.0006;             // 空氣阻力（每一步；每秒約剩九成，跟 Godot 預設差不多）
+
+  // ── 互動教學：第一次玩自動開始，開始畫面也能重看。一步一個動作，做到了才進下一步 ──
+  // until：drop 放球／pocket 進洞（type 指定彈珠）／select:<種類> 換彈珠／stick 麻糬黏住／knock 鐵球撞倒／tap 點一下繼續
+  const TUTORIAL = [
+    { text: '手指按住畫面、左右拖動\n選球要掉下去的位置\n放開手指，球就掉下去！', until: 'drop', hand: 'swipe' },
+    { text: '球撞到釘子會彈來彈去\n掉進下面的洞就得分\n正中間 100 分最高', until: 'pocket', box: 'pockets' },
+    { text: '珍珠進洞分數 ×2！\n接著點上面的「麻糬」換一顆', until: 'select:mochi', box: 'btn:mochi', hand: 'btn:mochi' },
+    { text: '麻糬碰到釘子會黏住一下\n每黏一次 +5 分\n丟丟看！', until: 'stick' },
+    { text: '黏住了！\n再點上面的「鐵球」', until: 'select:iron', box: 'btn:iron', hand: 'btn:iron' },
+    { text: '鐵球很重，會撞倒釘子直直往下衝\n最好瞄準，但一局只有 3 顆\n瞄準正中間丟丟看！', until: 'pocket', type: 'iron' },
+    { text: '左上角是賓果卡\n橫的：珍珠／麻糬／鐵球\n直的：左／中／右的洞\n用那種彈珠進那一邊的洞就蓋章\n連成一條線 +150 分', until: 'tap', box: 'bingo' },
+    { text: '上面是這一局的攤位任務\n完成 +300 分', until: 'tap', box: 'task' },
+    { text: '還有：進 100 分洞送一顆球\n連續進洞分數加倍\n老闆偶爾會加碼！\n\n準備好了嗎？點一下開始', until: 'tap' },
+  ];
+  // 第一次遇到才跳出來的小提示（每支手機只出現一次）
+  const TIPS = {
+    bonus: '進 100 分洞，送你一顆球！',
+    combo: '連擊！2.5 秒內再進 50 或 100 分洞\n分數越疊越高',
+    fever: '老闆加碼！10 秒內分數 ×2，快丟！',
+    bingo: '賓果卡蓋到章了（左上）\n連成一條線 +150',
+    task: '攤位任務完成！+300',
+  };
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 存不了就算了 */ } },
+  };
 
   // ── 3 種彈珠（調平衡主要改這裡）──
   const BALL_TYPES = {
@@ -173,21 +199,35 @@
       this.matter.world.on('collisionstart', (ev) => {
         for (const p of ev.pairs) this.onCollide(p.bodyA, p.bodyB);
       });
-      this.input.on('pointermove', (p) => { this.dropX = this.clampX(p.x); });
+      // 操作：按住拖動瞄準，放開才放球（2026-10-15 改：之前一碰就放球，手機上沒辦法先「左右滑選位置」）
+      this.aiming = false;
+      this.input.on('pointermove', (p) => {
+        if (this.aiming || !p.wasTouch) this.dropX = this.clampX(p.x);   // 滑鼠移動就跟著；手指要按住才跟著
+      });
       this.input.on('pointerdown', (p, over) => {
         Sound.unlock();
-        // 點在按鈕上（換彈珠、再玩一局）不放球：之前按「再玩一局」那一下會同時被台面收到，新的一局一開始就自己掉一顆珍珠（2026-10-15 使用者回報）
+        if (this.tut && this.tutStep().until === 'tap') { if (this.time.now > this.tut.readyAt) this.tutEvent('tap'); return; }
+        // 點在按鈕上（換彈珠、再玩一局）不瞄準：之前按「再玩一局」那一下會同時被台面收到，新的一局一開始就自己掉一顆珍珠（2026-10-15 使用者回報）
         if (p.y < 92 || this.gameOver || (over && over.length) || this.time.now < this.noDropUntil) return;
+        this.aiming = true;
+        this.dropX = this.clampX(p.x);
+      });
+      const release = (p) => {
+        if (!this.aiming) return;
+        this.aiming = false;
+        if (this.gameOver) return;
         this.dropX = this.clampX(p.x);
         this.dropBall();
-      });
+      };
+      this.input.on('pointerup', release);
+      this.input.on('pointerupoutside', release);
       this.input.keyboard && this.input.keyboard.on('keydown', (e) => {
         Sound.unlock();
         for (const t of TYPE_ORDER) if (e.key === BALL_TYPES[t].key) this.selectType(t);
       });
       window.__game = this; // 給自動測試用
       this.player = '玩家';
-      window.NM_begin = (name) => { this.player = name; Sound.unlock(); this.restart(); };
+      window.NM_begin = (name, tutorial) => { this.player = name; Sound.unlock(); this.restart(); if (tutorial || !store.get('nm_tutorial_done', false)) this.startTutorial(); };
       if (window.NM_ready) window.NM_ready();
     }
 
@@ -282,11 +322,12 @@
       if (t === 'iron' && this.ironLeft <= 0) return;
       this.ballType = t;
       this.updateUI();
+      if (this.tut) this.tutEvent('select:' + t);
     }
 
     updateUI() {
       this.scoreText.setText(this.score + ' 分');
-      this.ballsText.setText('剩 ' + this.ballsLeft + ' 顆　按 1／2／3 換彈珠');
+      this.ballsText.setText('剩 ' + this.ballsLeft + ' 顆' + (this.sys.game.device.input.touch ? '' : '　按 1／2／3 換彈珠'));
       if (this.task && this.taskText) this.taskText.setText(this.taskDone ? '攤位任務完成 ✓' : '攤位任務：' + this.task.text + '（' + Math.min(this.stats[this.task.key], this.task.need) + '/' + this.task.need + '）').setColor(this.taskDone ? '#7fd6a6' : '#c9c1ee');
       for (const t of TYPE_ORDER) {
         const info = BALL_TYPES[t], b = this.buttons[t];
@@ -305,6 +346,7 @@
       this.lastDrop = this.time.now;
       this.ballsLeft--;
       this.dropped++;
+      if (this.tut) this.tutEvent('drop');
       if (this.dropped === this.feverAt) this.startFever();
       const info = BALL_TYPES[this.ballType];
       const body = this.matter.add.circle(this.dropX + (this.rng() * 2 - 1) * JITTER, DROP_Y, info.r, {
@@ -393,6 +435,8 @@
       if (POCKETS[index] === 50) this.addStat('p50', 1);
       this.stats.combo = Math.max(this.stats.combo, this.combo); this.checkTask();
       this.stampBingo(ball.type, index, x, y);
+      if (this.tut) this.tutEvent('pocket', ball.type);
+      if (bonus) this.tip('bonus'); if (comboMult > 1) this.tip('combo');
       // 獎勵球：進 100 分洞送一顆
       if (bonus) this.floatText('送一顆！', x, y - 110, 0xffc94d, 40);
       if (points >= 100) { this.cameras.main.shake(260, 0.012); Sound.play('big', 1, -2); }
@@ -400,11 +444,120 @@
       this.updateUI();
     }
 
-    addStat(key, n) { this.stats[key] += n; this.checkTask(); }
+    // ───────────── 互動教學 ─────────────
+    startTutorial() {
+      this.restart();
+      this.tut = { i: -1, readyAt: 0 };
+      this.ballsLeft = 99; this.ironLeft = 99; this.feverAt = -1;   // 教學中球用不完、不出現老闆加碼
+      this.selectType('pearl');
+      if (!this.tutLayer) {
+        this.tutBox = this.add.graphics().setDepth(29);
+        this.tutBubble = this.add.graphics().setDepth(30);
+        this.tutText = this.add.text(W / 2, 0, '', { fontFamily: FONT, fontSize: '30px', color: '#1c1730', align: 'center', lineSpacing: 6, resolution: 2, wordWrap: { width: W - 120 } }).setOrigin(0.5).setDepth(31);
+        this.tutHand = this.add.text(0, 0, '👆', { fontSize: '64px', resolution: 2 }).setOrigin(0.3, 0).setDepth(32);
+        this.tutSkip = this.add.text(W - 30, 1244, '跳過教學', { fontFamily: FONT, fontSize: '22px', color: '#8f86b3', resolution: 2, padding: { x: 12, y: 8 } }).setOrigin(1, 0.5).setDepth(32).setInteractive({ useHandCursor: true });
+        this.tutSkip.on('pointerdown', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); this.endTutorial(); });
+        this.tutLayer = true;
+      }
+      this.tutNext();
+    }
+
+    tutStep() { return TUTORIAL[this.tut.i] || {}; }
+
+    tutEvent(ev, type) {
+      if (!this.tut) return;
+      const st = this.tutStep();
+      if (st.until !== ev) return;
+      if (st.type && st.type !== type) return;
+      this.time.delayedCall(ev === 'tap' ? 0 : 450, () => this.tutNext());
+      this.tut.waiting = true;
+    }
+
+    tutNext() {
+      if (!this.tut) return;
+      this.tut.i++; this.tut.waiting = false; this.tut.readyAt = this.time.now + 500;
+      if (this.tut.i >= TUTORIAL.length) return this.endTutorial(true);
+      const st = this.tutStep();
+      Sound.play('tik', 1.4, -8);
+      this.tutText.setText(st.text);
+      // 說明框放在不擋住重點的地方：重點在上面就放下面
+      const low = st.box === 'bingo' || st.box === 'task' || (st.box || '').startsWith('btn') || st.hand === 'swipe' || st.hand === 'tap';
+      const cy = st.box === 'pockets' ? 560 : low ? 760 : 560;
+      this.tutText.setY(cy);
+      const b = this.tutText.getBounds(), pad = 26;
+      this.tutBubble.clear().fillStyle(0xfff6dc, 0.97).fillRoundedRect(b.x - pad, b.y - pad, b.width + pad * 2, b.height + pad * 2, 22)
+        .lineStyle(4, 0xffc94d).strokeRoundedRect(b.x - pad, b.y - pad, b.width + pad * 2, b.height + pad * 2, 22);
+      if (st.until === 'tap') this.tutBubble.fillStyle(0xffc94d).fillTriangle(W / 2 - 12, b.bottom + pad - 4, W / 2 + 12, b.bottom + pad - 4, W / 2, b.bottom + pad + 10);
+      [this.tutBubble, this.tutText].forEach((o) => { o.setAlpha(0); this.tweens.add({ targets: o, alpha: 1, duration: 220 }); });
+      this.tutHand.setVisible(!!st.hand);
+      this.tutSkip.setVisible(true);
+    }
+
+    endTutorial(finished) {
+      store.set('nm_tutorial_done', true);
+      this.tut = null;
+      this.tutBox.clear(); this.tutBubble.clear(); this.tutText.setText(''); this.tutHand.setVisible(false); this.tutSkip.setVisible(false);
+      this.restart();
+      this.floatText(finished ? '開始囉！' : '正式開始！', W / 2, 600, 0xffc94d, 56);
+    }
+
+    tutTargetRect(key) {
+      if (!key) return null;
+      if (key.startsWith('btn:')) { const bg = this.buttons[key.slice(4)].bg; return { x: bg.x, y: bg.y, w: bg.width, h: bg.height }; }
+      if (key === 'bingo') return { x: 26, y: 142, w: 132, h: 112 };
+      if (key === 'task') { const t = this.taskText.getBounds(); return { x: t.x - 8, y: t.y - 6, w: t.width + 16, h: t.height + 12 }; }
+      if (key === 'pockets') return { x: WALL, y: POCKET_TOP - 10, w: W - WALL * 2, h: FLOOR_Y - POCKET_TOP + 20 };
+      return null;
+    }
+
+    drawTutorial(t) {
+      const st = this.tutStep();
+      // 球在跑的時候說明框變淡，看得到球往哪裡掉
+      const fade = st.until !== 'tap' && this.balls.length > 0 && this.time.now > this.tut.readyAt ? 0.25 : null;
+      if (fade !== null || this.tut.faded) { const a = fade !== null ? fade : 1; this.tutBubble.setAlpha(a); this.tutText.setAlpha(a); this.tut.faded = fade !== null; }
+      // 重點框：亮黃色、會呼吸
+      this.tutBox.clear();
+      const r = this.tutTargetRect(st.box);
+      if (r) {
+        const a = 0.6 + 0.4 * Math.sin(t * 6);
+        this.tutBox.lineStyle(5, 0xffc94d, a).strokeRoundedRect(r.x - 6, r.y - 6, r.w + 12, r.h + 12, 12);
+      }
+      // 手指動畫
+      if (st.hand === 'swipe') {
+        const hx = W / 2 + Math.sin(t * 2.4) * 200;
+        this.tutHand.setPosition(hx, DROP_Y + 20).setScale(1);
+        if (!this.aiming) this.dropX = this.clampX(hx);   // 示範：預覽的球跟著手指動
+      } else if (st.hand === 'tap') {
+        const k = (t * 1.6) % 1;
+        this.tutHand.setPosition(this.dropX, DROP_Y + 20 + (k < 0.3 ? k * 40 : 12)).setScale(k < 0.3 ? 1 - k * 0.5 : 0.85);
+      } else if (st.hand && st.hand.startsWith('btn:')) {
+        const bg = this.buttons[st.hand.slice(4)].bg, k = (t * 1.6) % 1;
+        this.tutHand.setPosition(bg.x + 66, bg.y + 50 + (k < 0.3 ? k * 30 : 9)).setScale(k < 0.3 ? 1 - k * 0.4 : 0.88);
+      }
+    }
+
+    // 第一次遇到某個玩法才跳出來的小提示
+    tip(key) {
+      if (this.tut || !TIPS[key]) return;
+      this.tipsSeen = this.tipsSeen || store.get('nm_tips', {});
+      if (this.tipsSeen[key]) return;
+      this.tipsSeen[key] = 1; store.set('nm_tips', this.tipsSeen);
+      if (!this.tipText) {
+        this.tipBg = this.add.graphics().setDepth(27);
+        this.tipText = this.add.text(W / 2, 330, '', { fontFamily: FONT, fontSize: '26px', color: '#1c1730', align: 'center', lineSpacing: 4, resolution: 2 }).setOrigin(0.5).setDepth(28);
+      }
+      this.tipText.setText(TIPS[key]).setAlpha(1);
+      const b = this.tipText.getBounds(), pad = 18;
+      this.tipBg.clear().fillStyle(0xfff6dc, 0.95).fillRoundedRect(b.x - pad, b.y - pad, b.width + pad * 2, b.height + pad * 2, 16).setAlpha(1);
+      this.tweens.killTweensOf([this.tipText, this.tipBg]);
+      this.tweens.add({ targets: [this.tipText, this.tipBg], alpha: 0, delay: 2600, duration: 500 });
+    }
+
+    addStat(key, n) { this.stats[key] += n; this.checkTask(); if (this.tut && (key === 'stick' || key === 'knock')) this.tutEvent(key); }
 
     checkTask() {
       if (this.taskDone || this.gameOver || this.stats[this.task.key] < this.task.need) return;
-      this.taskDone = true; this.score += TASK_REWARD;
+      this.taskDone = true; this.score += TASK_REWARD; this.tip('task');
       this.floatText('攤位任務完成！+' + TASK_REWARD, W / 2, 460, 0x7fd6a6, 46);
       Sound.play('big', 1.1, -3); this.updateUI();
     }
@@ -412,7 +565,7 @@
     stampBingo(type, index, x, y) {
       const cell = TYPE_ORDER.indexOf(type) * 3 + BINGO_SIDE[index];
       if (this.bingo[cell]) return;
-      this.bingo[cell] = 1;
+      this.bingo[cell] = 1; this.tip('bingo');
       let bonus = 0;
       BINGO_LINES.forEach((l, i) => {
         if (!this.bingoLines.has(i) && l.every((c) => this.bingo[c])) { this.bingoLines.add(i); bonus += BINGO_LINE; }
@@ -440,13 +593,14 @@
       this.floatText('老闆加碼！\n10 秒內分數 ×2', W / 2, 520, 0xffc94d, 52);
       this.cameras.main.flash(300, 90, 70, 20);
       Sound.play('big', 1.2, -2);
+      this.tip('fever');
     }
 
     removeBall(ball) {
       const i = this.balls.indexOf(ball);
       if (i >= 0) this.balls.splice(i, 1);
       this.matter.world.remove(ball.body);
-      if (this.ballsLeft === 0 && this.balls.length === 0) this.endGame();
+      if (this.ballsLeft === 0 && this.balls.length === 0 && !this.tut) this.endGame();
     }
 
     endGame() {
@@ -559,6 +713,7 @@
       for (const p of this.particles) { p.life -= dt / 1000; p.vy += 1100 * dt / 1000; p.x += p.vx * dt / 1000; p.y += p.vy * dt / 1000; }
       this.particles = this.particles.filter((p) => p.life > 0);
       this.draw();
+      if (this.tut) this.drawTutorial(this.time0);
     }
 
     draw() {

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#120f1f">
 <title>夜市彈珠台</title>
-<link rel="preload" href="vendor/phaser.min.js?v=20261015224850" as="script">
+<link rel="preload" href="vendor/phaser.min.js?v=20261015230107" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
@@ -26,9 +26,7 @@
   #board h3{margin:0 0 4px;font-size:13px;color:#ffc94d;font-weight:700;text-align:center}
   #board ol{margin:0;padding-left:1.6em;line-height:1.55}
   #board .me{color:#ffc94d;font-weight:700}
-  #rules{max-width:340px;font-size:13px;color:#c9c1ee}
-  #rules summary{text-align:center;color:#ffc94d;min-height:32px;line-height:32px;cursor:pointer}
-  #rules ul{margin:4px 0 0;padding-left:1.3em;line-height:1.5}
+  #tutorial{font-family:inherit;font-size:15px;color:#ffc94d;background:transparent;border:1px solid #5a4a20;border-radius:20px;padding:8px 18px;min-height:40px}
   #ver{position:fixed;right:6px;bottom:4px;color:#4b4370;font:11px monospace;pointer-events:none;z-index:11}
 </style>
 </head>
@@ -41,7 +39,7 @@
   <div id="people"></div>
   <div id="rec"></div>
   <button id="go" type="button">開始</button>
-  <details id="rules"><summary>怎麼玩</summary><ul><li>左右滑選落點，點一下放球；上面三個按鈕換彈珠。</li><li>珍珠進洞分數 ×2；麻糬黏住釘子每次 +5；鐵球撞倒釘子、最好瞄，每局 3 顆。</li><li>進 100 分洞送一顆球（每局最多 8 顆）。</li><li>連擊：2.5 秒內連續進 50 或 100 分洞，×2、×3；掉進 10 分洞就斷。</li><li>老闆加碼：每局會出現一次，10 秒內分數 ×2。</li><li>攤位任務：每局一個小目標，完成 +300。</li><li>賓果卡（左上）：橫的是珍珠／麻糬／鐵球，直的是左／中／右的洞。用那種彈珠進那一邊的洞就蓋章，連一條線 +150，全滿 +800。</li></ul></details>
+  <button id="tutorial" type="button">怎麼玩？看教學</button>
   <div id="board"></div>
   <div id="msg">載入中…</div>
   <button id="retry" type="button">點一下重試</button>
@@ -52,9 +50,9 @@
 // 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
 // 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
 // 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
-// 版本號：發佈腳本會把 20261015224850 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
+// 版本號：發佈腳本會把 20261015230107 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261015224850', DEV = VER.indexOf('__') === 0;
+  var VER = '20261015230107', DEV = VER.indexOf('__') === 0;
   document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
 
   // ── 紀錄 ──
@@ -134,12 +132,15 @@
 
   // ── 開始 ──
   var ready = false, wantStart = false;
+  var wantTutorial = false;
   function begin() {
     var n = nameEl.value.trim() || '玩家';
     save(NAME_KEY, n); wantStart = false;
     start.style.display = 'none';
-    window.NM_begin(n);
+    window.NM_begin(n, wantTutorial); wantTutorial = false;
   }
+  // 看教學：第一次玩會自動進教學，這個按鈕是給想再看一次的人
+  document.getElementById('tutorial').onclick = function () { wantTutorial = true; go.onclick(); };
   go.onclick = function () {
     unlockAudio();
     if (ready) begin(); else { wantStart = true; go.disabled = true; go.textContent = '載入中…'; }
