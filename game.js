@@ -45,7 +45,8 @@
   const PEG_BOUNCE = 0;          // Matter 的彈性取兩者較大值：釘子設 0，球照自己的彈性彈
   const JITTER = 2;              // 放球時隨機偏移幾像素：約七成可預測、三成混沌
   const DROP_COOLDOWN = 220;     // 毫秒
-  const MAX_ON_BOARD = 3;        // 台面上同時最多幾顆（2026-10-15：一口氣連丟比慢慢瞄準還高分，運氣成分太重）
+  const MAX_ON_BOARD_FEVER = 99;  // 老闆加碼時不限顆數（使用者：「如果限制三顆 那老闆加碼就效果有限啊」）
+  const MAX_ON_BOARD = 3;       // 台面上同時最多幾顆（2026-10-15：一口氣連丟比慢慢瞄準還高分，運氣成分太重）
   const AIR = 0.0006;             // 空氣阻力（每一步；每秒約剩九成，跟 Godot 預設差不多）
 
   // ── 互動教學：第一次玩自動開始，開始畫面也能重看。一步一個動作，做到了才進下一步 ──
@@ -65,7 +66,7 @@
   const TIPS = {
     bonus: '進 100 分洞，送你一顆球！',
     combo: '連擊！2.5 秒內再進 50 或 100 分洞\n分數越疊越高',
-    fever: '老闆加碼！10 秒內分數 ×2，快丟！',
+    fever: '老闆加碼！10 秒內分數加倍\n而且不限顆數，快丟！',
     bingo: '賓果卡蓋到章了（左上）\n連成一條線 +150',
     task: '攤位任務完成！+300',
   };
@@ -344,7 +345,8 @@
     // ───────────── 遊戲流程 ─────────────
     dropBall() {
       if (this.ballsLeft <= 0 || this.time.now - this.lastDrop < DROP_COOLDOWN) return;
-      if (this.balls.length >= MAX_ON_BOARD && !this.tut) { this.floatText('台上最多 ' + MAX_ON_BOARD + ' 顆', this.dropX, DROP_Y + 40, 0x8f86b3, 26); return; }
+      const cap = this.feverLeft > 0 ? MAX_ON_BOARD_FEVER : MAX_ON_BOARD;
+      if (this.balls.length >= cap && !this.tut) { this.floatText('台上最多 ' + cap + ' 顆', this.dropX, DROP_Y + 40, 0x8f86b3, 26); return; }
       if (this.ballType === 'iron') { if (this.ironLeft <= 0) return; this.ironLeft--; }
       this.lastDrop = this.time.now;
       this.ballsLeft--;
@@ -595,7 +597,7 @@
 
     startFever() {
       this.feverLeft = FEVER_TIME;
-      this.floatText('老闆加碼！\n10 秒內分數 ×2', W / 2, 520, 0xffc94d, 52);
+      this.floatText('老闆加碼！\n10 秒內加倍、不限顆數', W / 2, 520, 0xffc94d, 52);
       this.cameras.main.flash(300, 90, 70, 20);
       Sound.play('big', 1.2, -2);
       this.tip('fever');
@@ -667,7 +669,7 @@
       if (!this.gameOver) this.clock += dt;
       if (this.feverLeft > 0) {
         this.feverLeft -= dt;
-        if (this.feverLeft > 0) this.feverText.setText('老闆加碼 ×2　剩 ' + Math.ceil(this.feverLeft / 1000) + ' 秒').setVisible(true);
+        if (this.feverLeft > 0) this.feverText.setText('老闆加碼・不限顆數　剩 ' + Math.ceil(this.feverLeft / 1000) + ' 秒').setVisible(true);
         else this.feverText.setVisible(false);
       }
       const M = this.M;
