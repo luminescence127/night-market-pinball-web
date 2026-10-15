@@ -131,7 +131,7 @@
       this.score = 0; this.ballsLeft = BALLS_PER_GAME; this.ironLeft = IRON_PER_GAME;
       this.ballType = 'pearl'; this.dropX = W / 2; this.lastDrop = -9999; this.time0 = 0;
       this.pegs = []; this.balls = []; this.pocketFlash = [0, 0, 0, 0, 0]; this.history = [];
-      this.gameOver = false;
+      this.gameOver = false; this.noDropUntil = 0;
 
       this.matter.world.setGravity(0, GRAVITY);
       this.matter.world.autoUpdate = false;     // 自己拆小步更新，避免穿透
@@ -150,9 +150,10 @@
         for (const p of ev.pairs) this.onCollide(p.bodyA, p.bodyB);
       });
       this.input.on('pointermove', (p) => { this.dropX = this.clampX(p.x); });
-      this.input.on('pointerdown', (p) => {
+      this.input.on('pointerdown', (p, over) => {
         Sound.unlock();
-        if (p.y < 92 || this.gameOver) return;     // 上方是按鈕列
+        // 點在按鈕上（換彈珠、再玩一局）不放球：之前按「再玩一局」那一下會同時被台面收到，新的一局一開始就自己掉一顆珍珠（2026-10-15 使用者回報）
+        if (p.y < 92 || this.gameOver || (over && over.length) || this.time.now < this.noDropUntil) return;
         this.dropX = this.clampX(p.x);
         this.dropBall();
       });
@@ -241,7 +242,7 @@
       this.msgText = this.add.text(W / 2, 560, '', { fontFamily: FONT, fontSize: '52px', color: C.text, resolution: 2 }).setOrigin(0.5).setDepth(20).setVisible(false);
       this.restartBg = this.add.rectangle(W / 2, 672, 260, 84, 0xffc94d).setDepth(20).setVisible(false).setInteractive({ useHandCursor: true });
       this.restartText = this.add.text(W / 2, 672, '再玩一局', { fontFamily: FONT, fontSize: '34px', color: '#1c1730', resolution: 2 }).setOrigin(0.5).setDepth(21).setVisible(false);
-      this.restartBg.on('pointerdown', () => this.restart());
+      this.restartBg.on('pointerdown', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); this.restart(); });
     }
 
     selectType(t) {
@@ -360,7 +361,7 @@
     restart() {
       for (const b of this.balls.slice()) this.removeBall(b);
       this.score = 0; this.ballsLeft = BALLS_PER_GAME; this.ironLeft = IRON_PER_GAME; this.ballType = 'pearl';
-      this.gameOver = false;
+      this.gameOver = false; this.noDropUntil = this.time.now + 300;
       this.msgText.setVisible(false); this.restartBg.setVisible(false); this.restartText.setVisible(false);
       this.updateUI();
     }

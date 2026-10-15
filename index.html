@@ -18,11 +18,11 @@
 <div id="game"></div>
 <div id="ver"></div>
 <script>
-// 版本號：發佈腳本會把 20261015222013 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角，回報問題時看得到是哪一版。
+// 版本號：發佈腳本會把 20261015223208 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角，回報問題時看得到是哪一版。
 // 載入：依序載入 Phaser 與遊戲程式；失敗（例如 iPhone 切到背景時下載被中斷）會自動重試，
 // 回到前景時也會再試；重試用完就顯示「點一下重試」（2026-10-15 效能研究建議）。
 (function () {
-  var VER = '20261015222013';
+  var VER = '20261015223208';
   document.getElementById('ver').textContent = VER === '__VER' + '__' ? 'dev' : 'v' + VER;
   var files = ['vendor/phaser.min.js', 'game.js'];
   var msg = document.getElementById('msg'), retry = document.getElementById('retry');
