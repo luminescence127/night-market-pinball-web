@@ -244,7 +244,7 @@
         this.buttons[t] = { bg, label };
       });
       this.overPanel = this.add.rectangle(W / 2, 640, W - 50, 330, 0x120f1f, 0.9).setStrokeStyle(2, 0x3a2f5c).setDepth(19).setVisible(false);
-      this.msgText = this.add.text(W / 2, 540, '', { fontFamily: FONT, fontSize: '40px', color: C.text, align: 'center', lineSpacing: 10, resolution: 2, wordWrap: { width: W - 60 } }).setOrigin(0.5).setDepth(20).setVisible(false);
+      this.msgText = this.add.text(W / 2, 540, '', { fontFamily: FONT, fontSize: '34px', color: C.text, align: 'center', lineSpacing: 8, resolution: 2, wordWrap: { width: W - 60 } }).setOrigin(0.5).setDepth(20).setVisible(false);
       this.restartBg = this.add.rectangle(W / 2, 672, 260, 84, 0xffc94d).setDepth(20).setVisible(false).setInteractive({ useHandCursor: true });
       this.restartText = this.add.text(W / 2, 672, '再玩一局', { fontFamily: FONT, fontSize: '34px', color: '#1c1730', resolution: 2 }).setOrigin(0.5).setDepth(21).setVisible(false);
       this.restartBg.on('pointerdown', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); this.restart(); });
@@ -367,6 +367,14 @@
         const r = window.NM_records.add(this.player, this.score);
         line2 = r.newBest && r.best > 0 ? '\n新紀錄！歷史最高 ' + r.best + ' 分' : '\n今日最高 ' + r.todayBest + '　歷史最高 ' + r.best;
         if (r.newBest && r.best > 0) Sound.play('big');
+      }
+      // 上傳到線上排行榜，回來再補上名次（連不上就算了）
+      if (window.NM_cloud && this.player && this.score > 0) {
+        const base = this.player + '　這局 ' + this.score + ' 分' + line2, round = this.round = (this.round || 0) + 1;
+        window.NM_cloud.submit(this.player, this.score).then((d) => {
+          if (!d || !d.ok || round !== this.round || !this.gameOver) return;
+          this.msgText.setText(base + '\n今日第 ' + d.rankToday + ' 名　歷史第 ' + d.rankAll + ' 名');
+        }).catch(() => {});
       }
       this.msgText.setText(this.player + '　這局 ' + this.score + ' 分' + line2).setVisible(true);
       this.restartBg.setVisible(true); this.restartText.setVisible(true);
