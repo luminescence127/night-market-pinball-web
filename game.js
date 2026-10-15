@@ -23,6 +23,20 @@
   const COMBO_MULT = [1, 2, 2, 3];                // 第 n 次連擊的倍數（第 1 顆 ×1、第 2～3 顆 ×2、第 4 顆起 ×3）
   const FEVER_TIME = 10000, FEVER_MULT = 2;       // F6 老闆加碼：每局一次、10 秒內分數 ×2
   const FEVER_FROM = 4, FEVER_TO = 10;            // 在第幾顆到第幾顆之間隨機出現
+  // F3 攤位任務：每局隨機一個小目標，完成 +TASK_REWARD
+  const TASK_REWARD = 300;
+  const TASKS = [
+    { key: 'stick', text: '麻糬黏住 35 次', need: 35 },
+    { key: 'knock', text: '鐵球撞倒 24 根釘子', need: 24 },
+    { key: 'pearl100', text: '珍珠進 100 分洞 2 次', need: 2 },
+    { key: 'combo', text: '連擊達到 4', need: 4 },
+    { key: 'p50', text: '進 50 分洞 6 次', need: 6 },
+  ];
+  // F2 賓果：3×3 卡，橫列＝彈珠種類（珍珠／麻糬／鐵球），直行＝洞的位置（左／中／右）。
+  // 用某種彈珠進某一邊的洞就蓋章；連成一條線 +BINGO_LINE，九格全滿再 +BINGO_FULL。
+  const BINGO_LINE = 150, BINGO_FULL = 800;
+  const BINGO_SIDE = [0, 0, 1, 2, 2];               // 5 個洞對應左／中／右
+  const BINGO_LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 
   // ── 手感參數（調手感主要改這裡）──
   const GRAVITY = 1.5;           // Matter 的重力（1 約等於 1000 px/s²；Godot 版是 1500）
@@ -243,6 +257,7 @@
 
     buildUI() {
       this.scoreText = this.add.text(30, 6, '', { fontFamily: FONT, fontSize: '40px', color: C.text, resolution: 2 }).setDepth(10);
+      this.taskText = this.add.text(W / 2 + 50, 182, '', { fontFamily: FONT, fontSize: '22px', color: '#c9c1ee', resolution: 2 }).setOrigin(0.5).setDepth(10);
       this.feverText = this.add.text(W / 2, 212, '', { fontFamily: FONT, fontSize: '28px', color: '#ffc94d', stroke: '#000000', strokeThickness: 5, resolution: 2 }).setOrigin(0.5).setDepth(12).setVisible(false);
       this.ballsText = this.add.text(32, 56, '', { fontFamily: FONT, fontSize: '20px', color: C.dim, resolution: 2 }).setDepth(10);
       this.buttons = {};
@@ -272,6 +287,7 @@
     updateUI() {
       this.scoreText.setText(this.score + ' 分');
       this.ballsText.setText('剩 ' + this.ballsLeft + ' 顆　按 1／2／3 換彈珠');
+      if (this.task && this.taskText) this.taskText.setText(this.taskDone ? '攤位任務完成 ✓' : '攤位任務：' + this.task.text + '（' + Math.min(this.stats[this.task.key], this.task.need) + '/' + this.task.need + '）').setColor(this.taskDone ? '#7fd6a6' : '#c9c1ee');
       for (const t of TYPE_ORDER) {
         const info = BALL_TYPES[t], b = this.buttons[t];
         const extra = t === 'iron' ? '（剩 ' + this.ironLeft + '）' : '';
@@ -320,6 +336,7 @@
         ball.stickPos = { x: ballBody.position.x, y: ballBody.position.y };
         ball.stickPeg = peg;
         this.score += MOCHI_STICK_POINTS; ball.pts += MOCHI_STICK_POINTS;
+        this.addStat('stick', 1);
         this.floatText('+' + MOCHI_STICK_POINTS, ballBody.position.x, ballBody.position.y - 26, 0xfff1ea, 24);
         Sound.play('stick', 0.9 + this.rng() * 0.2, -6);
         this.updateUI();
@@ -340,6 +357,7 @@
         const dx = b.position.x - peg.x, dy = b.position.y - peg.y;
         if (dx * dx + dy * dy > rr * rr) continue;
         peg.down = IRON_KNOCK_TIME; peg.flash = 1;
+        this.addStat('knock', 1);
         peg.body.isSensor = true;
         const v = vel(b);
         M.Body.setVelocity(b, { x: v.x * IRON_SIDE_KEEP + (dx / rr) * IRON_NUDGE + (this.rng() * 2 - 1) * IRON_RAND, y: Math.max(v.y * 0.85, 3.7) });   // 撞倒釘子會慢一點點
@@ -371,6 +389,10 @@
       const tags = (info.mult > 1 ? '珍珠×2 ' : '') + (comboMult > 1 ? '連擊×' + comboMult + ' ' : '') + (fever > 1 ? '加碼×2' : '');
       this.floatText('+' + points + (tags ? '\n' + tags.trim() : ''), x, y - 40, color, 34 + Math.min(points, 200) / 6);
       if (comboMult > 1) Sound.play('ding', 1 + this.combo * 0.12, -4);
+      if (ball.type === 'pearl' && POCKETS[index] === 100) this.addStat('pearl100', 1);
+      if (POCKETS[index] === 50) this.addStat('p50', 1);
+      this.stats.combo = Math.max(this.stats.combo, this.combo); this.checkTask();
+      this.stampBingo(ball.type, index, x, y);
       // 獎勵球：進 100 分洞送一顆
       if (bonus) this.floatText('送一顆！', x, y - 110, 0xffc94d, 40);
       if (points >= 100) { this.cameras.main.shake(260, 0.012); Sound.play('big', 1, -2); }
@@ -378,7 +400,36 @@
       this.updateUI();
     }
 
+    addStat(key, n) { this.stats[key] += n; this.checkTask(); }
+
+    checkTask() {
+      if (this.taskDone || this.gameOver || this.stats[this.task.key] < this.task.need) return;
+      this.taskDone = true; this.score += TASK_REWARD;
+      this.floatText('攤位任務完成！+' + TASK_REWARD, W / 2, 460, 0x7fd6a6, 46);
+      Sound.play('big', 1.1, -3); this.updateUI();
+    }
+
+    stampBingo(type, index, x, y) {
+      const cell = TYPE_ORDER.indexOf(type) * 3 + BINGO_SIDE[index];
+      if (this.bingo[cell]) return;
+      this.bingo[cell] = 1;
+      let bonus = 0;
+      BINGO_LINES.forEach((l, i) => {
+        if (!this.bingoLines.has(i) && l.every((c) => this.bingo[c])) { this.bingoLines.add(i); bonus += BINGO_LINE; }
+      });
+      if (!this.bingoFull && this.bingo.every(Boolean)) { this.bingoFull = true; bonus += BINGO_FULL; }
+      if (bonus) {
+        this.score += bonus;
+        this.floatText((this.bingoFull && bonus >= BINGO_FULL ? '全滿！' : '賓果！') + '+' + bonus, W / 2, 400, 0xffc94d, 50);
+        this.cameras.main.shake(200, 0.008); Sound.play('big', 0.9, -2);
+        this.updateUI();
+      }
+    }
+
     resetBonus() {
+      this.stats = { stick: 0, knock: 0, pearl100: 0, combo: 0, p50: 0 };
+      this.task = TASKS[Math.floor(this.rng() * TASKS.length)]; this.taskDone = false;
+      this.bingo = [0, 0, 0, 0, 0, 0, 0, 0, 0]; this.bingoLines = new Set(); this.bingoFull = false;
       this.clock = 0; this.combo = 0; this.lastPocketAt = -1e9; this.bonusGiven = 0; this.dropped = 0;
       this.feverLeft = 0; this.feverAt = FEVER_FROM + Math.floor(this.rng() * (FEVER_TO - FEVER_FROM + 1));
       if (this.feverText) this.feverText.setVisible(false);
@@ -520,6 +571,20 @@
         const c = C.lanterns[i % C.lanterns.length], fv = this.feverLeft > 0, glow = fv ? 0.75 + 0.25 * Math.sin(t * 14 + i * 1.7) : 0.55 + 0.45 * Math.sin(t * 2.2 + i * 0.9);
         g.fillStyle(c, (fv ? 0.35 : 0.18) * glow).fillCircle(x, y, fv ? 20 : 14);
         g.fillStyle(lerpColor(c, 0xffffff, 0.3 * glow)).fillCircle(x, y, 6);
+      }
+      // 賓果卡：3×3，左邊的點是彈珠種類，蓋到章的格子亮起來
+      if (this.bingo) {
+        const x0 = 52, y0 = 150, cs = 28, gap = 4;
+        for (let r = 0; r < 3; r++) {
+          const info = BALL_TYPES[TYPE_ORDER[r]];
+          g.fillStyle(info.color).fillCircle(x0 - 14, y0 + r * (cs + gap) + cs / 2, 8);
+          g.lineStyle(1.5, info.hi, 0.8).strokeCircle(x0 - 14, y0 + r * (cs + gap) + cs / 2, 8);
+          for (let c = 0; c < 3; c++) {
+            const on = this.bingo[r * 3 + c], bx = x0 + c * (cs + gap), by = y0 + r * (cs + gap);
+            g.fillStyle(on ? 0xffc94d : 0x2a2340, on ? 0.95 : 1).fillRect(bx, by, cs, cs);
+            g.lineStyle(1, 0x3a2f5c).strokeRect(bx, by, cs, cs);
+          }
+        }
       }
       // 放球位置的預覽
       if (this.ballsLeft > 0 && !this.gameOver) {
