@@ -14,7 +14,7 @@
   const DROP_Y = 150, PEG_TOP = 260, PEG_ROWS = 12, PEG_DX = 72, PEG_DY = 66, PEG_R = 7;
   const POCKET_TOP = 1090, FLOOR_Y = 1220;
   const POCKETS = [10, 50, 100, 50, 10];
-  const BALLS_PER_GAME = 10;
+  const BALLS_PER_GAME = 15;
 
   // ── 手感參數（調手感主要改這裡）──
   const GRAVITY = 1.5;           // Matter 的重力（1 約等於 1000 px/s²；Godot 版是 1500）
