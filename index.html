@@ -5,33 +5,124 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#120f1f">
 <title>夜市彈珠台</title>
+<link rel="preload" href="vendor/phaser.min.js?v=20261015223509" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
-  #loading{position:fixed;inset:0;z-index:10;background:#120f1f;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;color:#8f86b3;font:16px "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif}
-  #retry{display:none;font:inherit;color:#1c1730;background:#ffc94d;border:0;border-radius:10px;padding:12px 22px;min-height:44px}
-  #ver{position:fixed;right:6px;bottom:4px;color:#4b4370;font:11px monospace;pointer-events:none;z-index:5}
+  #start{position:fixed;inset:0;z-index:10;background:#120f1f;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;padding:24px 16px;box-sizing:border-box;color:#e9e4ff;font:16px "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;touch-action:manipulation}
+  #start h1{margin:0;font-size:34px;color:#ffc94d;letter-spacing:.08em}
+  #start .sub{margin:0;color:#8f86b3;font-size:14px}
+  #start label{font-size:14px;color:#8f86b3;align-self:center}
+  #name{font-family:inherit;font-size:20px;width:min(260px,80vw);padding:10px 12px;border-radius:10px;border:2px solid #3a2f5c;background:#1c1730;color:#fff;text-align:center;-webkit-user-select:text;user-select:text}
+  #name:focus{outline:none;border-color:#ffc94d}
+  #go{font-family:inherit;font-size:22px;font-weight:700;color:#1c1730;background:#ffc94d;border:0;border-radius:12px;padding:12px 46px;min-height:52px}
+  #go[disabled]{opacity:.6}
+  #people{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:320px}
+  #people button{font-family:inherit;font-size:14px;color:#e9e4ff;background:#2a2340;border:1px solid #3a2f5c;border-radius:16px;padding:6px 12px;min-height:36px}
+  #rec{min-height:2.6em;text-align:center;color:#c9c1ee;font-size:14px;line-height:1.5}
+  #msg{color:#8f86b3;font-size:13px;min-height:1.4em}
+  #retry{display:none;font:inherit;color:#1c1730;background:#ffc94d;border:0;border-radius:10px;padding:10px 20px;min-height:44px}
+  #ver{position:fixed;right:6px;bottom:4px;color:#4b4370;font:11px monospace;pointer-events:none;z-index:11}
 </style>
 </head>
 <body>
-<div id="loading"><span id="msg">載入中…</span><button id="retry" type="button">點一下重試</button></div>
+<div id="start">
+  <h1>夜市彈珠台</h1>
+  <p class="sub">珍珠會彈、麻糬會黏、鐵球撞得倒釘子</p>
+  <label for="name">你的名字</label>
+  <input id="name" maxlength="12" autocomplete="off" enterkeyhint="go" placeholder="輸入名字">
+  <div id="people"></div>
+  <div id="rec"></div>
+  <button id="go" type="button">開始</button>
+  <div id="msg">載入中…</div>
+  <button id="retry" type="button">點一下重試</button>
+</div>
 <div id="game"></div>
 <div id="ver"></div>
 <script>
-// 版本號：發佈腳本會把 20261015223208 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角，回報問題時看得到是哪一版。
-// 載入：依序載入 Phaser 與遊戲程式；失敗（例如 iPhone 切到背景時下載被中斷）會自動重試，
-// 回到前景時也會再試；重試用完就顯示「點一下重試」（2026-10-15 效能研究建議）。
+// 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
+// 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
+// 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
+// 版本號：發佈腳本會把 20261015223509 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261015223208';
-  document.getElementById('ver').textContent = VER === '__VER' + '__' ? 'dev' : 'v' + VER;
+  var VER = '20261015223509', DEV = VER.indexOf('__') === 0;
+  document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
+
+  // ── 紀錄 ──
+  var REC_KEY = 'nm_records', NAME_KEY = 'nm_name';
+  function load(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+  function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 私密瀏覽等存不了就算了 */ } }
+  function today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  window.NM_records = {
+    get: function (name) { return (load(REC_KEY, {})[name]) || null; },
+    all: function () { return load(REC_KEY, {}); },
+    // 回傳 { best, todayBest, newBest, newToday }
+    add: function (name, score) {
+      var all = load(REC_KEY, {}), r = all[name] || { best: 0, daily: {}, games: 0, recent: [] }, t = today();
+      var newBest = score > r.best, newToday = score > (r.daily[t] || 0);
+      if (newBest) r.best = score;
+      if (newToday) r.daily[t] = score;
+      r.games++; r.recent.unshift({ t: Date.now(), s: score }); r.recent = r.recent.slice(0, 20);
+      var days = Object.keys(r.daily).sort(); while (days.length > 60) delete r.daily[days.shift()];
+      all[name] = r; save(REC_KEY, all);
+      return { best: r.best, todayBest: r.daily[t], newBest: newBest, newToday: newToday };
+    },
+    today: today,
+  };
+
+  var start = document.getElementById('start'), nameEl = document.getElementById('name'), go = document.getElementById('go');
+  var msg = document.getElementById('msg'), retry = document.getElementById('retry'), recEl = document.getElementById('rec'), people = document.getElementById('people');
+  nameEl.value = load(NAME_KEY, '') || '';
+  function showRec() {
+    var n = nameEl.value.trim(), r = n && NM_records.get(n);
+    recEl.textContent = r ? '今日最高 ' + (r.daily[today()] || 0) + ' 分　歷史最高 ' + r.best + ' 分\n玩過 ' + r.games + ' 局' : (n ? '第一次玩，加油！' : '');
+    recEl.style.whiteSpace = 'pre-line';
+  }
+  function showPeople() {
+    var names = Object.keys(NM_records.all()); people.innerHTML = '';
+    if (names.length < 2) return;
+    names.forEach(function (n) { var b = document.createElement('button'); b.type = 'button'; b.textContent = n; b.onclick = function () { nameEl.value = n; showRec(); }; people.appendChild(b); });
+  }
+  nameEl.addEventListener('input', showRec);
+  nameEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { nameEl.blur(); go.click(); } });
+  showRec(); showPeople();
+  window.NM_showStart = function () { showRec(); showPeople(); start.style.display = 'flex'; go.disabled = false; go.textContent = '開始'; };
+
+  // ── 聲音：在「開始」這一下打開（game.js 的 Sound 會接手這個 AudioContext）──
+  function unlockAudio() {
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+    var A = window.NM_audio || (window.NM_audio = {});
+    try {
+      if (!A.ctx) { var AC = window.AudioContext || window.webkitAudioContext; if (AC) A.ctx = new AC(); }
+      if (A.ctx) {
+        if (A.ctx.state === 'suspended') A.ctx.resume();
+        var b = A.ctx.createBuffer(1, 1, 22050), s = A.ctx.createBufferSource(); s.buffer = b; s.connect(A.ctx.destination); s.start(0);
+      }
+    } catch (e) {}
+  }
+
+  // ── 開始 ──
+  var ready = false, wantStart = false;
+  function begin() {
+    var n = nameEl.value.trim() || '玩家';
+    save(NAME_KEY, n); wantStart = false;
+    start.style.display = 'none';
+    window.NM_begin(n);
+  }
+  go.onclick = function () {
+    unlockAudio();
+    if (ready) begin(); else { wantStart = true; go.disabled = true; go.textContent = '載入中…'; }
+  };
+
+  // ── 載入：依序載入 Phaser 與遊戲程式；失敗自動重試，回到前景再試，用完顯示「點一下重試」──
   var files = ['vendor/phaser.min.js', 'game.js'];
-  var msg = document.getElementById('msg'), retry = document.getElementById('retry');
   var i = 0, tries = 0, busy = false;
+  window.NM_ready = function () { ready = true; msg.textContent = ''; if (wantStart) begin(); };
   function next() {
-    if (i >= files.length) { document.getElementById('loading').remove(); return; }
-    busy = true;
+    if (i >= files.length) return;
+    busy = true; msg.textContent = '載入中…（' + (i + 1) + '/' + files.length + '）';
     var s = document.createElement('script');
-    s.src = files[i] + (VER.indexOf('__') === 0 ? '' : '?v=' + VER);
+    s.src = files[i] + (DEV ? '' : '?v=' + VER);
     s.onload = function () { busy = false; i++; tries = 0; next(); };
     s.onerror = function () {
       busy = false; s.remove(); tries++;
@@ -40,11 +131,16 @@
     };
     document.body.appendChild(s);
   }
-  retry.onclick = function () { retry.style.display = 'none'; msg.textContent = '載入中…'; tries = 0; next(); };
+  retry.onclick = function () { retry.style.display = 'none'; tries = 0; next(); };
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden && !busy && i < files.length && retry.style.display !== 'block') setTimeout(next, 500);
   });
   next();
+
+  // ── 存在手機裡：第二次打開幾乎不用等，沒網路也能玩（service worker）──
+  if ('serviceWorker' in navigator && !DEV) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js?v=' + VER).catch(function () {}); });
+  }
 })();
 </script>
 </body>

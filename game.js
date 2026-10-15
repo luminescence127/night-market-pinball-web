@@ -73,7 +73,7 @@
       if (!this.ctx) {
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
-        this.ctx = new AC();
+        this.ctx = (window.NM_audio && window.NM_audio.ctx) || new AC();   // 開始畫面按「開始」時已建立並打開
         this.buf.tik = this.tone([2300, 3450], 0.07, 55, 0.32, 0.4);
         this.buf.drop = this.tone([420], 0.12, 30, 0.3, 0.2);
         this.buf.ding = this.tone([880, 1320], 0.4, 8, 0.4, 0);
@@ -97,7 +97,8 @@
       return b;
     },
     play(name, rate = 1, db = 0) {
-      if (!this.ctx || !this.buf[name] || this.ctx.state !== 'running') return;
+      if (!this.ctx || !this.buf[name]) return;
+      if (this.ctx.state !== 'running') { this.ctx.resume(); if (this.ctx.state !== 'running') return; }
       const src = this.ctx.createBufferSource();
       src.buffer = this.buf[name];
       src.playbackRate.value = rate;
@@ -162,6 +163,9 @@
         for (const t of TYPE_ORDER) if (e.key === BALL_TYPES[t].key) this.selectType(t);
       });
       window.__game = this; // 給自動測試用
+      this.player = '玩家';
+      window.NM_begin = (name) => { this.player = name; Sound.unlock(); this.restart(); };
+      if (window.NM_ready) window.NM_ready();
     }
 
     clampX(x) { return Phaser.Math.Clamp(x, WALL + 18, W - WALL - 18); }
@@ -239,10 +243,14 @@
         bg.on('pointerdown', (p, lx, ly, ev) => { Sound.unlock(); this.selectType(t); ev && ev.stopPropagation && ev.stopPropagation(); });
         this.buttons[t] = { bg, label };
       });
-      this.msgText = this.add.text(W / 2, 560, '', { fontFamily: FONT, fontSize: '52px', color: C.text, resolution: 2 }).setOrigin(0.5).setDepth(20).setVisible(false);
+      this.overPanel = this.add.rectangle(W / 2, 640, W - 50, 330, 0x120f1f, 0.9).setStrokeStyle(2, 0x3a2f5c).setDepth(19).setVisible(false);
+      this.msgText = this.add.text(W / 2, 540, '', { fontFamily: FONT, fontSize: '40px', color: C.text, align: 'center', lineSpacing: 10, resolution: 2, wordWrap: { width: W - 60 } }).setOrigin(0.5).setDepth(20).setVisible(false);
       this.restartBg = this.add.rectangle(W / 2, 672, 260, 84, 0xffc94d).setDepth(20).setVisible(false).setInteractive({ useHandCursor: true });
       this.restartText = this.add.text(W / 2, 672, '再玩一局', { fontFamily: FONT, fontSize: '34px', color: '#1c1730', resolution: 2 }).setOrigin(0.5).setDepth(21).setVisible(false);
       this.restartBg.on('pointerdown', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); this.restart(); });
+      // 換人：回開始畫面
+      this.switchText = this.add.text(W / 2, 744, '換人玩', { fontFamily: FONT, fontSize: '24px', color: '#c9c1ee', resolution: 2, padding: { x: 24, y: 10 } }).setOrigin(0.5).setDepth(21).setVisible(false).setInteractive({ useHandCursor: true });
+      this.switchText.on('pointerdown', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); if (window.NM_showStart) window.NM_showStart(); });
     }
 
     selectType(t) {
@@ -354,15 +362,22 @@
 
     endGame() {
       this.gameOver = true;
-      this.msgText.setText('這局 ' + this.score + ' 分').setVisible(true);
+      let line2 = '';
+      if (window.NM_records && this.player) {
+        const r = window.NM_records.add(this.player, this.score);
+        line2 = r.newBest && r.best > 0 ? '\n新紀錄！歷史最高 ' + r.best + ' 分' : '\n今日最高 ' + r.todayBest + '　歷史最高 ' + r.best;
+        if (r.newBest && r.best > 0) Sound.play('big');
+      }
+      this.msgText.setText(this.player + '　這局 ' + this.score + ' 分' + line2).setVisible(true);
       this.restartBg.setVisible(true); this.restartText.setVisible(true);
+      this.switchText.setVisible(true); this.overPanel.setVisible(true);
     }
 
     restart() {
       for (const b of this.balls.slice()) this.removeBall(b);
       this.score = 0; this.ballsLeft = BALLS_PER_GAME; this.ironLeft = IRON_PER_GAME; this.ballType = 'pearl';
       this.gameOver = false; this.noDropUntil = this.time.now + 300;
-      this.msgText.setVisible(false); this.restartBg.setVisible(false); this.restartText.setVisible(false);
+      this.msgText.setVisible(false); this.restartBg.setVisible(false); this.restartText.setVisible(false); this.switchText.setVisible(false); this.overPanel.setVisible(false);
       this.updateUI();
     }
 
