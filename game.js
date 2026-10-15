@@ -1,6 +1,6 @@
 // 夜市彈珠台（網頁版，Phaser 3.90 + 內建 Matter.js 物理，都是 MIT）。
 // 2026-10-15 從 Godot 版（scripts/main.gd）照搬：Godot 網頁版 43 MB，iPhone 4G 打不開，使用者選「改用 Phaser 重寫」。
-// 玩法：先選彈珠，手指左右滑（或滑鼠移動）選落點，點一下放球；球撞釘子掉進底部的洞得分，10 顆用完一局結束。
+// 玩法：先選彈珠，手指左右滑（或滑鼠移動）選落點，點一下放球；球撞釘子掉進底部的洞得分，15 顆用完一局結束（進 100 分洞送一顆、連擊加倍、老闆加碼時間）。
 // 3 種彈珠（外觀＝玩法）：
 //   珍珠：Q 彈、最亂，進洞分數 ×2。
 //   麻糬：碰到釘子會黏住一下，每黏一次 +5 分。
@@ -15,6 +15,14 @@
   const POCKET_TOP = 1090, FLOOR_Y = 1220;
   const POCKETS = [10, 50, 100, 50, 10];
   const BALLS_PER_GAME = 15;
+
+  // ── 加碼玩法（2026-10-15 使用者 10 個點子全部想試，先做這三個）──
+  const BONUS_POCKET = 100, BONUS_MAX = 8;        // F1 獎勵球：進 100 分洞送 1 顆，一局最多送 8 顆
+  const COMBO_WINDOW = 2500;                      // F5 連擊：上一顆進洞後 2.5 秒內再進洞算連擊
+  const COMBO_MIN = 50;
+  const COMBO_MULT = [1, 2, 2, 3];                // 第 n 次連擊的倍數（第 1 顆 ×1、第 2～3 顆 ×2、第 4 顆起 ×3）
+  const FEVER_TIME = 10000, FEVER_MULT = 2;       // F6 老闆加碼：每局一次、10 秒內分數 ×2
+  const FEVER_FROM = 4, FEVER_TO = 10;            // 在第幾顆到第幾顆之間隨機出現
 
   // ── 手感參數（調手感主要改這裡）──
   const GRAVITY = 1.5;           // Matter 的重力（1 約等於 1000 px/s²；Godot 版是 1500）
@@ -133,6 +141,7 @@
       this.ballType = 'pearl'; this.dropX = W / 2; this.lastDrop = -9999; this.time0 = 0;
       this.pegs = []; this.balls = []; this.pocketFlash = [0, 0, 0, 0, 0]; this.history = [];
       this.gameOver = false; this.noDropUntil = 0;
+      this.resetBonus();
 
       this.matter.world.setGravity(0, GRAVITY);
       this.matter.world.autoUpdate = false;     // 自己拆小步更新，避免穿透
@@ -234,6 +243,7 @@
 
     buildUI() {
       this.scoreText = this.add.text(30, 6, '', { fontFamily: FONT, fontSize: '40px', color: C.text, resolution: 2 }).setDepth(10);
+      this.feverText = this.add.text(W / 2, 212, '', { fontFamily: FONT, fontSize: '28px', color: '#ffc94d', stroke: '#000000', strokeThickness: 5, resolution: 2 }).setOrigin(0.5).setDepth(12).setVisible(false);
       this.ballsText = this.add.text(32, 56, '', { fontFamily: FONT, fontSize: '20px', color: C.dim, resolution: 2 }).setDepth(10);
       this.buttons = {};
       TYPE_ORDER.forEach((t, i) => {
@@ -278,6 +288,8 @@
       if (this.ballType === 'iron') { if (this.ironLeft <= 0) return; this.ironLeft--; }
       this.lastDrop = this.time.now;
       this.ballsLeft--;
+      this.dropped++;
+      if (this.dropped === this.feverAt) this.startFever();
       const info = BALL_TYPES[this.ballType];
       const body = this.matter.add.circle(this.dropX + (this.rng() * 2 - 1) * JITTER, DROP_Y, info.r, {
         restitution: info.bounce, friction: info.friction, frictionAir: AIR, frictionStatic: 0.1, label: 'ball',
@@ -339,18 +351,44 @@
     onPocket(ball, index) {
       if (!this.balls.includes(ball)) return;
       const info = BALL_TYPES[ball.type];
-      const points = POCKETS[index] * info.mult;
+      // 連擊：上一顆進洞後 COMBO_WINDOW 內再進洞
+      // 只有 50、100 分洞算連擊，掉進 10 分洞就斷（不然一直往正中間連丟就是最強打法）
+      if (POCKETS[index] < COMBO_MIN) this.combo = 0;
+      else this.combo = this.combo > 0 && this.clock - this.lastPocketAt <= COMBO_WINDOW ? this.combo + 1 : 1;
+      this.lastPocketAt = this.clock;
+      const comboMult = this.combo > 0 ? COMBO_MULT[Math.min(this.combo, COMBO_MULT.length) - 1] : 1;
+      const fever = this.feverLeft > 0 ? FEVER_MULT : 1;
+      const points = POCKETS[index] * info.mult * comboMult * fever;
       this.score += points;
       this.history.push({ type: ball.type, points: points + ball.pts });
       this.pocketFlash[index] = 1;
       const { x, y } = ball.body.position;
+      const bonus = POCKETS[index] === BONUS_POCKET && this.bonusGiven < BONUS_MAX;
+      if (bonus) { this.bonusGiven++; this.ballsLeft++; }   // 先加再移除球，免得最後一顆進洞時先判定結束
       this.removeBall(ball);
       const color = C.pockets[index];
       this.burst(x, y, color, 14 + Math.floor(points / 4));
-      this.floatText('+' + points + (info.mult > 1 ? '（×2）' : ''), x, y - 40, color, 34 + Math.min(points, 200) / 6);
+      const tags = (info.mult > 1 ? '珍珠×2 ' : '') + (comboMult > 1 ? '連擊×' + comboMult + ' ' : '') + (fever > 1 ? '加碼×2' : '');
+      this.floatText('+' + points + (tags ? '\n' + tags.trim() : ''), x, y - 40, color, 34 + Math.min(points, 200) / 6);
+      if (comboMult > 1) Sound.play('ding', 1 + this.combo * 0.12, -4);
+      // 獎勵球：進 100 分洞送一顆
+      if (bonus) this.floatText('送一顆！', x, y - 110, 0xffc94d, 40);
       if (points >= 100) { this.cameras.main.shake(260, 0.012); Sound.play('big', 1, -2); }
       else { this.cameras.main.shake(90, 0.003); Sound.play('ding', points >= 50 ? 1 : 0.8, -5); }
       this.updateUI();
+    }
+
+    resetBonus() {
+      this.clock = 0; this.combo = 0; this.lastPocketAt = -1e9; this.bonusGiven = 0; this.dropped = 0;
+      this.feverLeft = 0; this.feverAt = FEVER_FROM + Math.floor(this.rng() * (FEVER_TO - FEVER_FROM + 1));
+      if (this.feverText) this.feverText.setVisible(false);
+    }
+
+    startFever() {
+      this.feverLeft = FEVER_TIME;
+      this.floatText('老闆加碼！\n10 秒內分數 ×2', W / 2, 520, 0xffc94d, 52);
+      this.cameras.main.flash(300, 90, 70, 20);
+      Sound.play('big', 1.2, -2);
     }
 
     removeBall(ball) {
@@ -361,6 +399,7 @@
     }
 
     endGame() {
+      this.feverLeft = 0; this.feverText.setVisible(false);
       this.gameOver = true;
       let line2 = '';
       if (window.NM_records && this.player) {
@@ -385,6 +424,7 @@
       for (const b of this.balls.slice()) this.removeBall(b);
       this.score = 0; this.ballsLeft = BALLS_PER_GAME; this.ironLeft = IRON_PER_GAME; this.ballType = 'pearl';
       this.gameOver = false; this.noDropUntil = this.time.now + 300;
+      this.resetBonus();
       this.msgText.setVisible(false); this.restartBg.setVisible(false); this.restartText.setVisible(false); this.switchText.setVisible(false); this.overPanel.setVisible(false);
       this.updateUI();
     }
@@ -402,7 +442,7 @@
     floatText(text, x, y, color, size) {
       this.textPool = this.textPool || [];
       let t = this.textPool.find((o) => !o.active);
-      if (!t) { t = this.add.text(0, 0, '', { fontFamily: FONT, stroke: '#000000', strokeThickness: 6, resolution: 2 }).setOrigin(0.5).setDepth(15); this.textPool.push(t); }
+      if (!t) { t = this.add.text(0, 0, '', { fontFamily: FONT, stroke: '#000000', strokeThickness: 6, align: 'center', resolution: 2 }).setOrigin(0.5).setDepth(15); this.textPool.push(t); }
       this.tweens.killTweensOf(t);
       t.setActive(true).setVisible(true).setAlpha(1).setScale(0.6).setPosition(x, y).setText(text).setFontSize(Math.round(size)).setColor(hex(color));
       this.tweens.add({ targets: t, scale: 1, duration: 180, ease: 'Back.Out' });
@@ -414,6 +454,12 @@
     update(time, delta) {
       const dt = Math.min(delta, 50);
       this.time0 = time / 1000;
+      if (!this.gameOver) this.clock += dt;
+      if (this.feverLeft > 0) {
+        this.feverLeft -= dt;
+        if (this.feverLeft > 0) this.feverText.setText('老闆加碼 ×2　剩 ' + Math.ceil(this.feverLeft / 1000) + ' 秒').setVisible(true);
+        else this.feverText.setVisible(false);
+      }
       const M = this.M;
       this.acc = (this.acc || 0) + dt;
       let steps = 0;
@@ -471,8 +517,8 @@
       const n = 14;
       for (let i = 0; i < n; i++) {
         const x = WALL + (W - WALL * 2) * (i + 0.5) / n, y = 104 + Math.sin(i / n * Math.PI) * 18;
-        const c = C.lanterns[i % C.lanterns.length], glow = 0.55 + 0.45 * Math.sin(t * 2.2 + i * 0.9);
-        g.fillStyle(c, 0.18 * glow).fillCircle(x, y, 14);
+        const c = C.lanterns[i % C.lanterns.length], fv = this.feverLeft > 0, glow = fv ? 0.75 + 0.25 * Math.sin(t * 14 + i * 1.7) : 0.55 + 0.45 * Math.sin(t * 2.2 + i * 0.9);
+        g.fillStyle(c, (fv ? 0.35 : 0.18) * glow).fillCircle(x, y, fv ? 20 : 14);
         g.fillStyle(lerpColor(c, 0xffffff, 0.3 * glow)).fillCircle(x, y, 6);
       }
       // 放球位置的預覽
