@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#120f1f">
 <title>夜市彈珠台</title>
-<link rel="preload" href="vendor/phaser.min.js?v=20261015231003" as="script">
+<link rel="preload" href="vendor/phaser.min.js?v=20261015231835" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
@@ -22,11 +22,21 @@
   #rec{min-height:2.6em;text-align:center;color:#c9c1ee;font-size:14px;line-height:1.5}
   #msg{color:#8f86b3;font-size:13px;min-height:1.4em}
   #retry{display:none;font:inherit;color:#1c1730;background:#ffc94d;border:0;border-radius:10px;padding:10px 20px;min-height:44px}
-  #board{display:flex;gap:18px;justify-content:center;font-size:13px;color:#c9c1ee;min-height:1em}
+  #board{display:flex;flex-wrap:wrap;gap:12px 18px;justify-content:center;font-size:13px;color:#c9c1ee;min-height:1em}
   #board h3{margin:0 0 4px;font-size:13px;color:#ffc94d;font-weight:700;text-align:center}
   #board ol{margin:0;padding-left:1.6em;line-height:1.55}
   #board .me{color:#ffc94d;font-weight:700}
   #tutorial{font-family:inherit;font-size:15px;color:#ffc94d;background:transparent;border:1px solid #5a4a20;border-radius:20px;padding:8px 18px;min-height:40px}
+  #challenge{display:none;max-width:320px;text-align:center;background:#2a2340;border:2px solid #ffc94d;border-radius:12px;padding:10px 14px;color:#fff;font-size:16px;line-height:1.5}
+  #daily{font-family:inherit;font-size:16px;color:#1c1730;background:#7fd6a6;border:0;border-radius:12px;padding:10px 20px;min-height:44px}
+  #shelfBtn{font-family:inherit;font-size:15px;color:#e9e4ff;background:#2a2340;border:1px solid #3a2f5c;border-radius:20px;padding:8px 18px;min-height:40px}
+  #shelf{display:none;max-width:340px;background:#1c1730;border:1px solid #3a2f5c;border-radius:12px;padding:12px;text-align:center}
+  #shelf .tk{color:#ffc94d;font-weight:700;margin-bottom:8px}
+  #shelf .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  #shelf button{font-family:inherit;font-size:12px;color:#e9e4ff;background:#2a2340;border:1px solid #3a2f5c;border-radius:10px;padding:6px 2px;min-height:72px;line-height:1.3}
+  #shelf button .ic{font-size:28px;display:block}
+  #shelf button.own{border-color:#ffc94d}
+  #shelf button[disabled]{opacity:.45}
   #ver{position:fixed;right:6px;bottom:4px;color:#4b4370;font:11px monospace;pointer-events:none;z-index:11}
 </style>
 </head>
@@ -34,12 +44,16 @@
 <div id="start">
   <h1>夜市彈珠台</h1>
   <p class="sub">珍珠會彈、麻糬會黏、鐵球撞得倒釘子</p>
+  <div id="challenge"></div>
   <label for="name">你的名字</label>
   <input id="name" maxlength="12" autocomplete="off" enterkeyhint="go" placeholder="輸入名字">
   <div id="people"></div>
   <div id="rec"></div>
   <button id="go" type="button">開始</button>
+  <button id="daily" type="button">今日挑戰：大家玩同一局</button>
   <button id="tutorial" type="button">怎麼玩？看教學</button>
+  <button id="shelfBtn" type="button">🎁 獎品櫃</button>
+  <div id="shelf"></div>
   <div id="board"></div>
   <div id="msg">載入中…</div>
   <button id="retry" type="button">點一下重試</button>
@@ -50,9 +64,9 @@
 // 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
 // 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
 // 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
-// 版本號：發佈腳本會把 20261015231003 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
+// 版本號：發佈腳本會把 20261015231835 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261015231003', DEV = VER.indexOf('__') === 0;
+  var VER = '20261015231835', DEV = VER.indexOf('__') === 0;
   document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
 
   // ── 紀錄 ──
@@ -60,6 +74,19 @@
   function load(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 私密瀏覽等存不了就算了 */ } }
   function today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  // ── 獎品櫃（F7，2026-10-15）：每 100 分 1 張彩票，換夜市獎品。圖先用表情符號，風格定了再換成美術 ──
+  var TICKET_PER = 100;
+  var PRIZES = [
+    { id: 'candy', icon: '🍭', name: '棒棒糖', cost: 10 },
+    { id: 'balloon', icon: '🎈', name: '氣球', cost: 20 },
+    { id: 'fish', icon: '🐠', name: '撈到的金魚', cost: 30 },
+    { id: 'yoyo', icon: '🪀', name: '溜溜球', cost: 40 },
+    { id: 'mask', icon: '👺', name: '天狗面具', cost: 60 },
+    { id: 'bear', icon: '🧸', name: '小熊娃娃', cost: 80 },
+    { id: 'robot', icon: '🤖', name: '機器人', cost: 120 },
+    { id: 'lantern', icon: '🏮', name: '大紅燈籠', cost: 160 },
+    { id: 'crown', icon: '👑', name: '夜市王冠', cost: 250 },
+  ];
   window.NM_records = {
     get: function (name) { return (load(REC_KEY, {})[name]) || null; },
     all: function () { return load(REC_KEY, {}); },
@@ -70,11 +97,18 @@
       if (newBest) r.best = score;
       if (newToday) r.daily[t] = score;
       r.games++; r.recent.unshift({ t: Date.now(), s: score }); r.recent = r.recent.slice(0, 20);
+      var got = Math.floor(score / TICKET_PER); r.tickets = (r.tickets || 0) + got; r.prizes = r.prizes || {};
       var days = Object.keys(r.daily).sort(); while (days.length > 60) delete r.daily[days.shift()];
       all[name] = r; save(REC_KEY, all);
-      return { best: r.best, todayBest: r.daily[t], newBest: newBest, newToday: newToday };
+      return { best: r.best, todayBest: r.daily[t], newBest: newBest, newToday: newToday, tickets: got, ticketsTotal: r.tickets };
     },
     today: today,
+    redeem: function (name, id) {
+      var all = load(REC_KEY, {}), r = all[name], p = PRIZES.filter(function (x) { return x.id === id; })[0];
+      if (!r || !p || (r.tickets || 0) < p.cost) return false;
+      r.tickets -= p.cost; r.prizes = r.prizes || {}; r.prizes[id] = (r.prizes[id] || 0) + 1;
+      all[name] = r; save(REC_KEY, all); return true;
+    },
   };
 
   // ── 線上排行榜（Cloudflare Workers＋D1，使用者的免費方案）：連不上就只用手機紀錄，不擋遊戲 ──
@@ -86,7 +120,7 @@
   }
   window.NM_cloud = {
     // 本機測試版（dev）不上傳，免得測試分數混進排行榜（2026-10-15 自動試玩誤傳了 12 筆）
-    submit: function (name, score) { if (DEV) return Promise.resolve(null); return cloud('/score', { name: name, score: score, ver: VER }).then(function (d) { if (d && d.today) drawBoard(d); return d; }); },
+    submit: function (name, score) { if (DEV) return Promise.resolve(null); return cloud('/score', { name: name, score: score, ver: VER, mode: window.NM_mode || 'free' }).then(function (d) { if (d && d.today) drawBoard(d); return d; }); },
     top: function () { return cloud('/top').then(function (d) { drawBoard(d); return d; }); },
   };
   function drawBoard(d) {
@@ -95,7 +129,7 @@
       if (!rows || !rows.length) return '';
       return '<div><h3>' + title + '</h3><ol>' + rows.slice(0, 5).map(function (r) { var n = String(r.name).replace(/[<>&"]/g, ''); return '<li' + (n === me ? ' class="me"' : '') + '>' + n + '　' + r.score + '</li>'; }).join('') + '</ol></div>';
     }
-    el.innerHTML = list('今日排行', d.today) + list('歷史排行', d.all);
+    el.innerHTML = list('今日挑戰', d.daily) + list('今日排行', d.today) + list('歷史排行', d.all);
   }
 
   var start = document.getElementById('start'), nameEl = document.getElementById('name'), go = document.getElementById('go');
@@ -111,6 +145,19 @@
     if (names.length < 2) return;
     names.forEach(function (n) { var b = document.createElement('button'); b.type = 'button'; b.textContent = n; b.onclick = function () { nameEl.value = n; showRec(); }; people.appendChild(b); });
   }
+  var shelf = document.getElementById('shelf');
+  function drawShelf() {
+    var n = nameEl.value.trim() || '玩家', r = NM_records.get(n) || {}, tk = r.tickets || 0, own = r.prizes || {};
+    shelf.innerHTML = '<div class="tk">' + n.replace(/[<>&"]/g, '') + ' 的彩票：' + tk + ' 張（每 100 分 1 張）</div><div class="grid">' +
+      PRIZES.map(function (p) { return '<button type="button" data-id="' + p.id + '"' + (own[p.id] ? ' class="own"' : '') + (tk < p.cost ? ' disabled' : '') + '><span class="ic">' + p.icon + '</span>' + p.name + '<br>' + (own[p.id] ? '已有 ' + own[p.id] + '・' : '') + p.cost + ' 張</button>'; }).join('') + '</div>';
+  }
+  shelf.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-id]'); if (!b) return;
+    var n = nameEl.value.trim() || '玩家';
+    if (NM_records.redeem(n, b.dataset.id)) drawShelf();
+  });
+  document.getElementById('shelfBtn').onclick = function () { var on = shelf.style.display === 'block'; if (!on) drawShelf(); shelf.style.display = on ? 'none' : 'block'; };
+  nameEl.addEventListener('input', function () { if (shelf.style.display === 'block') drawShelf(); });
   nameEl.addEventListener('input', showRec);
   nameEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { nameEl.blur(); go.click(); } });
   showRec(); showPeople();
@@ -133,15 +180,29 @@
   // ── 開始 ──
   var ready = false, wantStart = false;
   var wantTutorial = false;
+  // ── 挑戰（2026-10-15）：朋友分享的連結 ?c=種子&from=名字&s=分數 → 同一局；今日挑戰 → 用台灣日期當種子，大家同一局 ──
+  var q = new URLSearchParams(location.search), friend = null, mode = 'free';
+  if (q.get('c') && /^\d{1,10}$/.test(q.get('c'))) {
+    friend = { seed: +q.get('c'), from: (q.get('from') || '朋友').slice(0, 12), score: Math.max(0, parseInt(q.get('s'), 10) || 0), mode: 'friend' };
+    var box = document.getElementById('challenge');
+    box.textContent = friend.from + ' 挑戰你！他打了 ' + friend.score + ' 分\n同一局，你打得贏嗎？';
+    box.style.whiteSpace = 'pre-line'; box.style.display = 'block';
+    go.textContent = '接受挑戰';
+  }
+  function dailySeed() { var t = today(), h = 2166136261; for (var k = 0; k < t.length; k++) { h ^= t.charCodeAt(k); h = Math.imul(h, 16777619); } return (h >>> 0) % 2147483646 + 1; }
   function begin() {
     var n = nameEl.value.trim() || '玩家';
     save(NAME_KEY, n); wantStart = false;
     start.style.display = 'none';
+    window.NM_challenge = mode === 'daily' ? { seed: dailySeed(), mode: 'daily' } : friend;
+    window.NM_mode = mode === 'daily' ? 'daily' : 'free';
     window.NM_begin(n, wantTutorial); wantTutorial = false;
   }
+  document.getElementById('daily').onclick = function () { mode = 'daily'; go.onclick(); };
   // 看教學：第一次玩會自動進教學，這個按鈕是給想再看一次的人
-  document.getElementById('tutorial').onclick = function () { wantTutorial = true; go.onclick(); };
-  go.onclick = function () {
+  document.getElementById('tutorial').onclick = function () { mode = 'free'; wantTutorial = true; go.onclick(); };
+  go.onclick = function (e) {
+    if (e) mode = 'free';
     unlockAudio();
     if (ready) begin(); else { wantStart = true; go.disabled = true; go.textContent = '載入中…'; }
   };

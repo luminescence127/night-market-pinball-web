@@ -69,7 +69,12 @@
     fever: '老闆加碼！10 秒內分數加倍\n而且不限顆數，快丟！',
     bingo: '賓果卡蓋到章了（左上）\n連成一條線 +150',
     task: '攤位任務完成！+300',
+    fishball: '魚丸：撞到釘子會分裂成兩顆\n每局限 2 顆（第 4 個按鈕每局會換）',
+    taro: '芋圓：超級彈，每撞一根釘子 +3\n每局限 2 顆（第 4 個按鈕每局會換）',
+    tangyuan: '湯圓：進洞之後會從上面再掉一次\n每局限 2 顆（第 4 個按鈕每局會換）',
   };
+  // F10 跟朋友比同一局（2026-10-15）：分享連結帶種子，朋友玩到一樣的攤位任務與老闆加碼時機
+  const seeded = (a) => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 存不了就算了 */ } },
@@ -79,9 +84,25 @@
   const BALL_TYPES = {
     pearl: { name: '珍珠', key: '1', r: 12, bounce: 0.62, friction: 0.02, gravity: 0.9, mult: 2, color: 0x4a2c1e, hi: 0xc49a7c, rule: 'Q 彈・分數 ×2' },
     mochi: { name: '麻糬', key: '2', r: 14, bounce: 0.12, friction: 0.3, gravity: 0.85, mult: 1, color: 0xfff1ea, hi: 0xffffff, rule: '會黏・每黏 +5' },
+    // F9 特別彈珠（2026-10-15）：每局隨機一種，限 SPECIAL_PER_GAME 顆
+    fishball: { name: '魚丸', key: '4', r: 13, bounce: 0.35, friction: 0.05, gravity: 0.9, mult: 1, color: 0xf2efe6, hi: 0xffffff, rule: '撞到會分裂・限 2 顆' },
+    taro: { name: '芋圓', key: '4', r: 13, bounce: 0.78, friction: 0.01, gravity: 0.95, mult: 1, color: 0x9c7bc9, hi: 0xe2d4f7, rule: '超彈・撞釘 +3・限 2 顆' },
+    tangyuan: { name: '湯圓', key: '4', r: 14, bounce: 0.3, friction: 0.1, gravity: 0.85, mult: 1, color: 0xffc9d6, hi: 0xffffff, rule: '進洞再來一次・限 2 顆' },
     iron: { name: '鐵球', key: '3', r: 14, bounce: 0.05, friction: 0.01, gravity: 0.8, mult: 1, color: 0x8d96a3, hi: 0xe8edf2, rule: '撞倒釘子・限 3 顆' },
   };
-  const TYPE_ORDER = ['pearl', 'mochi', 'iron'];
+  const TYPE_ORDER = ['pearl', 'mochi', 'iron'];   // 賓果卡的三列
+  const BUTTONS = ['pearl', 'mochi', 'iron', 'special'];
+  const SPECIALS = ['fishball', 'taro', 'tangyuan'], SPECIAL_PER_GAME = 2;
+  const FISH_SPLIT_R = 10, TARO_HIT_POINTS = 3;
+  // F8 台面機關（2026-10-15）：每局跟著種子選一種
+  //   燈籠彈跳器：把 3 根釘子換成大燈籠，撞到會被用力彈開 +BUMPER_POINTS
+  //   移動擋板：釘子區和洞之間有一塊左右來回的板子，要抓時機
+  const MACHINES = [
+    { key: 'bumpers', name: '燈籠彈跳器', desc: '撞到燈籠 +20 分' },
+    { key: 'slider', name: '移動擋板', desc: '洞口上方有擋板，抓時機丟' },
+  ];
+  const BUMPER_R = 20, BUMPER_POINTS = 20, BUMPER_KICK = 8;
+  const SLIDER_Y = 1045, SLIDER_W = 120, SLIDER_H = 14, SLIDER_PERIOD = 3200;
   const IRON_PER_GAME = 3;
   const IRON_KNOCK_TIME = 1200;  // 鐵球撞倒的釘子幾毫秒後立回來
   const IRON_SIDE_KEEP = 0.8;    // 鐵球撞到釘子後，橫向速度留幾成（越小越好瞄準）
@@ -227,6 +248,7 @@
       this.input.keyboard && this.input.keyboard.on('keydown', (e) => {
         Sound.unlock();
         for (const t of TYPE_ORDER) if (e.key === BALL_TYPES[t].key) this.selectType(t);
+        if (e.key === '4') this.selectType('special');
       });
       window.__game = this; // 給自動測試用
       this.player = '玩家';
@@ -304,39 +326,46 @@
       this.feverText = this.add.text(W / 2, 212, '', { fontFamily: FONT, fontSize: '28px', color: '#ffc94d', stroke: '#000000', strokeThickness: 5, resolution: 2 }).setOrigin(0.5).setDepth(12).setVisible(false);
       this.ballsText = this.add.text(32, 56, '', { fontFamily: FONT, fontSize: '20px', color: C.dim, resolution: 2 }).setDepth(10);
       this.buttons = {};
-      TYPE_ORDER.forEach((t, i) => {
-        const x = 296 + i * 140, y = 8;
-        const bg = this.add.rectangle(x, y, 132, 76, 0x2a2340).setOrigin(0).setStrokeStyle(2, 0x3a2f5c).setDepth(10).setInteractive({ useHandCursor: true });
-        const label = this.add.text(x + 66, y + 38, '', { fontFamily: FONT, fontSize: '22px', color: C.text, align: 'center', resolution: 2 }).setOrigin(0.5).setDepth(11);
+      BUTTONS.forEach((t, i) => {
+        const x = 284 + i * 107, y = 8;
+        const bg = this.add.rectangle(x, y, 102, 76, 0x2a2340).setOrigin(0).setStrokeStyle(2, 0x3a2f5c).setDepth(10).setInteractive({ useHandCursor: true });
+        const label = this.add.text(x + 51, y + 38, '', { fontFamily: FONT, fontSize: '19px', color: C.text, align: 'center', resolution: 2 }).setOrigin(0.5).setDepth(11);
         bg.on('pointerdown', (p, lx, ly, ev) => { Sound.unlock(); this.selectType(t); ev && ev.stopPropagation && ev.stopPropagation(); });
         this.buttons[t] = { bg, label };
       });
-      this.overPanel = this.add.rectangle(W / 2, 640, W - 50, 330, 0x120f1f, 0.9).setStrokeStyle(2, 0x3a2f5c).setDepth(19).setVisible(false);
-      this.msgText = this.add.text(W / 2, 540, '', { fontFamily: FONT, fontSize: '34px', color: C.text, align: 'center', lineSpacing: 8, resolution: 2, wordWrap: { width: W - 60 } }).setOrigin(0.5).setDepth(20).setVisible(false);
-      this.restartBg = this.add.rectangle(W / 2, 672, 260, 84, 0xffc94d).setDepth(20).setVisible(false).setInteractive({ useHandCursor: true });
-      this.restartText = this.add.text(W / 2, 672, '再玩一局', { fontFamily: FONT, fontSize: '34px', color: '#1c1730', resolution: 2 }).setOrigin(0.5).setDepth(21).setVisible(false);
+      this.overPanel = this.add.rectangle(W / 2, 690, W - 50, 470, 0x120f1f, 0.9).setStrokeStyle(2, 0x3a2f5c).setDepth(19).setVisible(false);
+      this.msgText = this.add.text(W / 2, 478, '', { fontFamily: FONT, fontSize: '30px', color: C.text, align: 'center', lineSpacing: 8, resolution: 2, wordWrap: { width: W - 60 } }).setOrigin(0.5, 0).setDepth(20).setVisible(false);
+      this.restartBg = this.add.rectangle(W / 2, 745, 260, 84, 0xffc94d).setDepth(20).setVisible(false).setInteractive({ useHandCursor: true });
+      this.restartText = this.add.text(W / 2, 745, '再玩一局', { fontFamily: FONT, fontSize: '34px', color: '#1c1730', resolution: 2 }).setOrigin(0.5).setDepth(21).setVisible(false);
       this.restartBg.on('pointerdown', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); this.restart(); });
       // 換人：回開始畫面
-      this.switchText = this.add.text(W / 2, 744, '換人玩', { fontFamily: FONT, fontSize: '24px', color: '#c9c1ee', resolution: 2, padding: { x: 24, y: 10 } }).setOrigin(0.5).setDepth(21).setVisible(false).setInteractive({ useHandCursor: true });
+      this.switchText = this.add.text(W / 2, 818, '換人玩', { fontFamily: FONT, fontSize: '24px', color: '#c9c1ee', resolution: 2, padding: { x: 24, y: 10 } }).setOrigin(0.5).setDepth(21).setVisible(false).setInteractive({ useHandCursor: true });
+      // 分享：用 pointerup（手機要「放開手指」那一下才允許開分享選單）
+      this.shareText = this.add.text(W / 2, 880, '', { fontFamily: FONT, fontSize: '26px', color: '#ffc94d', resolution: 2, padding: { x: 24, y: 12 } }).setOrigin(0.5).setDepth(21).setVisible(false).setInteractive({ useHandCursor: true });
+      this.shareText.on('pointerdown', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); });
+      this.shareText.on('pointerup', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); this.share(); });
       this.switchText.on('pointerdown', (p, lx, ly, ev) => { ev && ev.stopPropagation && ev.stopPropagation(); if (window.NM_showStart) window.NM_showStart(); });
     }
 
     selectType(t) {
+      if (t === 'special') { if (this.specialLeft <= 0) return; t = this.specialType; }
       if (t === 'iron' && this.ironLeft <= 0) return;
       this.ballType = t;
       this.updateUI();
       if (this.tut) this.tutEvent('select:' + t);
+      if (SPECIALS.includes(t)) this.tip(t);
     }
 
     updateUI() {
       this.scoreText.setText(this.score + ' 分');
       this.ballsText.setText('剩 ' + this.ballsLeft + ' 顆' + (this.sys.game.device.input.touch ? '' : '　按 1／2／3 換彈珠'));
       if (this.task && this.taskText) this.taskText.setText(this.taskDone ? '攤位任務完成 ✓' : '攤位任務：' + this.task.text + '（' + Math.min(this.stats[this.task.key], this.task.need) + '/' + this.task.need + '）').setColor(this.taskDone ? '#7fd6a6' : '#c9c1ee');
-      for (const t of TYPE_ORDER) {
-        const info = BALL_TYPES[t], b = this.buttons[t];
-        const extra = t === 'iron' ? '（剩 ' + this.ironLeft + '）' : '';
+      for (const t of BUTTONS) {
+        const real = t === 'special' ? this.specialType : t;
+        const info = BALL_TYPES[real], b = this.buttons[t];
+        const extra = t === 'iron' ? ' ' + this.ironLeft : t === 'special' ? ' ' + this.specialLeft : '';
         b.label.setText(info.name + extra + '\n' + info.rule.split('・')[0]);
-        const sel = t === this.ballType, off = t === 'iron' && this.ironLeft <= 0;
+        const sel = real === this.ballType, off = (t === 'iron' && this.ironLeft <= 0) || (t === 'special' && this.specialLeft <= 0);
         b.bg.setFillStyle(sel ? 0x4a3d72 : 0x2a2340).setStrokeStyle(sel ? 3 : 2, sel ? 0xffc94d : 0x3a2f5c);
         b.label.setAlpha(off ? 0.35 : 1);
       }
@@ -348,22 +377,76 @@
       const cap = this.feverLeft > 0 ? MAX_ON_BOARD_FEVER : MAX_ON_BOARD;
       if (this.balls.length >= cap && !this.tut) { this.floatText('台上最多 ' + cap + ' 顆', this.dropX, DROP_Y + 40, 0x8f86b3, 26); return; }
       if (this.ballType === 'iron') { if (this.ironLeft <= 0) return; this.ironLeft--; }
+      const special = SPECIALS.includes(this.ballType);
+      if (special) { if (this.specialLeft <= 0) return; this.specialLeft--; }
       this.lastDrop = this.time.now;
       this.ballsLeft--;
       this.dropped++;
       if (this.tut) this.tutEvent('drop');
       if (this.dropped === this.feverAt) this.startFever();
-      const info = BALL_TYPES[this.ballType];
-      const body = this.matter.add.circle(this.dropX + (this.rng() * 2 - 1) * JITTER, DROP_Y, info.r, {
-        restitution: info.bounce, friction: info.friction, frictionAir: AIR, frictionStatic: 0.1, label: 'ball',
-        collisionFilter: this.ballType === 'iron' ? { category: CAT_BALL, mask: 0xffff & ~CAT_PEG } : { category: CAT_BALL, mask: 0xffff },
-      });
-      const ball = { body, type: this.ballType, pts: 0, trail: [], stuck: 0, hitCd: 0, stick: 0, stickCd: 0, stickPos: null };
-      body.ball = ball;
-      this.balls.push(ball);
+      this.spawnBall(this.ballType, this.dropX + (this.rng() * 2 - 1) * JITTER, DROP_Y);
       Sound.play('drop', 0.9 + this.rng() * 0.2, -4);
       if (this.ballType === 'iron' && this.ironLeft <= 0) this.ballType = 'pearl';   // 鐵球用完自動換回珍珠
+      if (special && this.specialLeft <= 0) this.ballType = 'pearl';
       this.updateUI();
+    }
+
+    clearMachine() {
+      for (const b of this.bumpers || []) { this.matter.world.remove(b.body); b.peg.off = false; b.peg.body.isSensor = false; }
+      this.bumpers = [];
+      if (this.slider) { this.matter.world.remove(this.slider); this.slider = null; }
+      this.machine = null;
+    }
+
+    setupMachine(m, gr) {
+      if (!this.pegs || !this.pegs.length) return;   // create() 第一次呼叫時釘子還沒建好，restart 會再來
+      this.clearMachine();
+      this.machine = m;
+      if (m.key === 'bumpers') {
+        const cand = this.pegs.filter((p) => p.y >= PEG_TOP + PEG_DY * 2 && p.y <= PEG_TOP + PEG_DY * 9 && p.x > WALL + 90 && p.x < W - WALL - 90);
+        const picked = [];
+        while (picked.length < 3 && cand.length) {
+          const p = cand.splice(Math.floor(gr() * cand.length), 1)[0];
+          if (picked.every((q) => Math.hypot(q.x - p.x, q.y - p.y) > 180)) picked.push(p);
+        }
+        for (const p of picked) {
+          p.off = true; p.body.isSensor = true;
+          const body = this.matter.add.circle(p.x, p.y, BUMPER_R, { isStatic: true, restitution: 0.5, label: 'bumper' });
+          const bm = { x: p.x, y: p.y, peg: p, body, flash: 0 };
+          body.bumper = bm;
+          this.bumpers.push(bm);
+        }
+      } else if (m.key === 'slider') {
+        this.slider = this.matter.add.rectangle(W / 2, SLIDER_Y, SLIDER_W, SLIDER_H, { isStatic: true, restitution: 0.3, friction: 0.02, label: 'slider' });
+        this.sliderT0 = gr() * SLIDER_PERIOD;
+      }
+    }
+
+    moveSlider() {
+      if (!this.slider) return;
+      const span = (W - WALL * 2 - SLIDER_W) / 2 - 10;
+      const x = W / 2 + Math.sin((this.clock + this.sliderT0) / SLIDER_PERIOD * Math.PI * 2) * span;
+      this.M.Body.setPosition(this.slider, { x, y: SLIDER_Y });
+    }
+
+    spawnBall(type, x, y, opt = {}) {
+      const info = BALL_TYPES[type], r = opt.r || info.r;
+      const body = this.matter.add.circle(x, y, r, {
+        restitution: info.bounce, friction: info.friction, frictionAir: AIR, frictionStatic: 0.1, label: 'ball',
+        collisionFilter: type === 'iron' ? { category: CAT_BALL, mask: 0xffff & ~CAT_PEG } : { category: CAT_BALL, mask: 0xffff },
+      });
+      if (opt.vx || opt.vy) this.M.Body.setVelocity(body, { x: opt.vx || 0, y: opt.vy || 0 });
+      const ball = { body, type, r, pts: 0, trail: [], stuck: 0, hitCd: 0, stick: 0, stickCd: 0, stickPos: null, split: !!opt.split, reborn: !!opt.reborn };
+      body.ball = ball;
+      this.balls.push(ball);
+      return ball;
+    }
+
+    // 碰撞事件裡不能直接加減物體：先排進佇列，物理一步算完再做（魚丸分裂、湯圓再來一次）
+    queueSpawn(fn) { this.pendingSpawns++; (this.spawnQueue = this.spawnQueue || []).push(fn); }
+    runSpawns() {
+      const q = this.spawnQueue || []; this.spawnQueue = [];
+      for (const fn of q) { fn(); this.pendingSpawns--; }
     }
 
     onCollide(a, b) {
@@ -372,10 +455,36 @@
       const other = ballBody === a ? b : a;
       const ball = ballBody.ball;
       if (other.label === 'pocket') { this.onPocket(ball, other.pocketIndex); return; }
+      if (other.label === 'bumper' && other.bumper) {
+        const bm = other.bumper, p = ballBody.position, dx = p.x - bm.x, dy = p.y - bm.y, d = Math.hypot(dx, dy) || 1;
+        this.M.Body.setVelocity(ballBody, { x: dx / d * BUMPER_KICK, y: dy / d * BUMPER_KICK });
+        bm.flash = 1; this.score += BUMPER_POINTS; ball.pts += BUMPER_POINTS;
+        this.floatText('+' + BUMPER_POINTS, bm.x, bm.y - 34, 0xff8a5c, 28);
+        Sound.play('ding', 1.5, -6); this.updateUI();
+        return;
+      }
       if (other.label !== 'peg' || !other.peg) return;
+      if (other.peg.off) return;
       const peg = other.peg;
       peg.flash = 1;
       const M = this.M;
+      if (ball.type === 'fishball' && !ball.split && !ball.splitting && ballBody.position.y > PEG_TOP + 40) {
+        ball.splitting = true;
+        this.queueSpawn(() => {
+          if (!this.balls.includes(ball)) return;
+          const p = ball.body.position, v = vel(ball.body);
+          this.spawnBall('fishball', p.x - 8, p.y, { r: FISH_SPLIT_R, split: true, vx: v.x - 2.2, vy: v.y * 0.5 });
+          this.spawnBall('fishball', p.x + 8, p.y, { r: FISH_SPLIT_R, split: true, vx: v.x + 2.2, vy: v.y * 0.5 });
+          this.removeBall(ball);
+          this.floatText('分裂！', p.x, p.y - 30, 0xf2efe6, 30);
+          Sound.play('clank', 1.5, -8);
+        });
+      }
+      if (ball.type === 'taro' && ball.hitCd <= 0) {
+        this.score += TARO_HIT_POINTS; ball.pts += TARO_HIT_POINTS;
+        this.floatText('+' + TARO_HIT_POINTS, ballBody.position.x, ballBody.position.y - 24, 0xc9b0ee, 22);
+        this.updateUI();
+      }
       if (ball.type === 'mochi' && ball.stickCd <= 0 && ball.stick <= 0) {
         // 麻糬：黏在釘子上一下，每黏一次加分
         ball.stick = MOCHI_STICK_TIME;
@@ -400,6 +509,7 @@
     ironPass(ball) {
       const b = ball.body, rr = BALL_TYPES.iron.r + PEG_R, M = this.M;
       for (const peg of this.pegs) {
+        if (peg.off) continue;   // 換成燈籠的釘子
         if (peg.down > 0) continue;
         const dx = b.position.x - peg.x, dy = b.position.y - peg.y;
         if (dx * dx + dy * dy > rr * rr) continue;
@@ -432,6 +542,9 @@
       const { x, y } = ball.body.position;
       const bonus = POCKETS[index] === BONUS_POCKET && this.bonusGiven < BONUS_MAX;
       if (bonus) { this.bonusGiven++; this.ballsLeft++; }   // 先加再移除球，免得最後一顆進洞時先判定結束
+      if (ball.type === 'tangyuan' && !ball.reborn) {   // 要在移除球之前排進佇列，免得最後一顆時先判定結束
+        this.queueSpawn(() => { const nx = WALL + 60 + this.rng() * (W - WALL * 2 - 120); this.spawnBall('tangyuan', nx, DROP_Y, { reborn: true }); this.floatText('湯圓再來一次！', nx, DROP_Y + 50, 0xffc9d6, 32); });
+      }
       this.removeBall(ball);
       const color = C.pockets[index];
       this.burst(x, y, color, 14 + Math.floor(points / 4));
@@ -453,9 +566,9 @@
 
     // ───────────── 互動教學 ─────────────
     startTutorial() {
+      this.tut = { i: -1, readyAt: 0 };   // 先設好，restart 才不會公告機關
       this.restart();
-      this.tut = { i: -1, readyAt: 0 };
-      this.ballsLeft = 99; this.ironLeft = 99; this.feverAt = -1;   // 教學中球用不完、不出現老闆加碼
+      this.ballsLeft = 99; this.ironLeft = 99; this.feverAt = -1; this.clearMachine();   // 教學中球用不完、不出現老闆加碼
       this.selectType('pearl');
       if (!this.tutLayer) {
         this.tutBox = this.add.graphics().setDepth(29);
@@ -539,7 +652,7 @@
         this.tutHand.setPosition(this.dropX, DROP_Y + 20 + (k < 0.3 ? k * 40 : 12)).setScale(k < 0.3 ? 1 - k * 0.5 : 0.85);
       } else if (st.hand && st.hand.startsWith('btn:')) {
         const bg = this.buttons[st.hand.slice(4)].bg, k = (t * 1.6) % 1;
-        this.tutHand.setPosition(bg.x + 66, bg.y + 50 + (k < 0.3 ? k * 30 : 9)).setScale(k < 0.3 ? 1 - k * 0.4 : 0.88);
+        this.tutHand.setPosition(bg.x + 51, bg.y + 50 + (k < 0.3 ? k * 30 : 9)).setScale(k < 0.3 ? 1 - k * 0.4 : 0.88);
       }
     }
 
@@ -570,6 +683,7 @@
     }
 
     stampBingo(type, index, x, y) {
+      if (TYPE_ORDER.indexOf(type) < 0) return;   // 特別彈珠不蓋章
       const cell = TYPE_ORDER.indexOf(type) * 3 + BINGO_SIDE[index];
       if (this.bingo[cell]) return;
       this.bingo[cell] = 1; this.tip('bingo');
@@ -586,12 +700,27 @@
       }
     }
 
+    share() {
+      const base = location.origin + location.pathname;
+      const url = base + '?c=' + this.seed + '&from=' + encodeURIComponent(this.player) + '&s=' + this.score;
+      const text = this.player + ' 在夜市彈珠台打了 ' + this.score + ' 分，同一局你打得贏嗎？';
+      const done = (msg) => this.shareText.setText(msg);
+      if (navigator.share) { navigator.share({ title: '夜市彈珠台', text, url }).then(() => done('已分享！'), () => {}); return; }
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text + ' ' + url).then(() => done('連結已複製，貼給朋友吧！'), () => window.prompt('複製這個連結給朋友', url)); return; }
+      window.prompt('複製這個連結給朋友', url);
+    }
+
     resetBonus() {
+      const ch = window.NM_challenge;
+      this.seed = ch && ch.seed ? ch.seed : (Math.floor(Math.random() * 2147483646) + 1);
+      const gr = seeded(this.seed);
       this.stats = { stick: 0, knock: 0, pearl100: 0, combo: 0, p50: 0 };
-      this.task = TASKS[Math.floor(this.rng() * TASKS.length)]; this.taskDone = false;
+      this.setupMachine(MACHINES[Math.floor(gr() * MACHINES.length)], gr);
+      this.specialType = SPECIALS[Math.floor(gr() * SPECIALS.length)]; this.specialLeft = SPECIAL_PER_GAME; this.pendingSpawns = 0;
+      this.task = TASKS[Math.floor(gr() * TASKS.length)]; this.taskDone = false;
       this.bingo = [0, 0, 0, 0, 0, 0, 0, 0, 0]; this.bingoLines = new Set(); this.bingoFull = false;
       this.clock = 0; this.combo = 0; this.lastPocketAt = -1e9; this.bonusGiven = 0; this.dropped = 0;
-      this.feverLeft = 0; this.feverAt = FEVER_FROM + Math.floor(this.rng() * (FEVER_TO - FEVER_FROM + 1));
+      this.feverLeft = 0; this.feverAt = FEVER_FROM + Math.floor(gr() * (FEVER_TO - FEVER_FROM + 1));
       if (this.feverText) this.feverText.setVisible(false);
     }
 
@@ -607,7 +736,7 @@
       const i = this.balls.indexOf(ball);
       if (i >= 0) this.balls.splice(i, 1);
       this.matter.world.remove(ball.body);
-      if (this.ballsLeft === 0 && this.balls.length === 0 && !this.tut) this.endGame();
+      if (this.ballsLeft === 0 && this.balls.length === 0 && !this.tut && !this.pendingSpawns) this.endGame();
     }
 
     endGame() {
@@ -617,6 +746,7 @@
       if (window.NM_records && this.player) {
         const r = window.NM_records.add(this.player, this.score);
         line2 = r.newBest && r.best > 0 ? '\n新紀錄！歷史最高 ' + r.best + ' 分' : '\n今日最高 ' + r.todayBest + '　歷史最高 ' + r.best;
+        if (r.tickets) line2 += '\n🎟 +' + r.tickets + ' 張彩票（共 ' + r.ticketsTotal + ' 張，開始畫面換獎品）';
         if (r.newBest && r.best > 0) Sound.play('big');
       }
       // 上傳到線上排行榜，回來再補上名次（連不上就算了）
@@ -627,17 +757,21 @@
           this.msgText.setText(base + '\n今日第 ' + d.rankToday + ' 名　歷史第 ' + d.rankAll + ' 名');
         }).catch(() => {});
       }
+      const ch = window.NM_challenge;
+      if (ch && ch.from) line2 += '\n' + (this.score > ch.score ? '贏過 ' + ch.from + ' 的 ' + ch.score + ' 分！' : this.score === ch.score ? '跟 ' + ch.from + ' 平手！' : '還差 ' + ch.from + ' ' + (ch.score - this.score) + ' 分');
       this.msgText.setText(this.player + '　這局 ' + this.score + ' 分' + line2).setVisible(true);
       this.restartBg.setVisible(true); this.restartText.setVisible(true);
-      this.switchText.setVisible(true); this.overPanel.setVisible(true);
+      this.switchText.setVisible(true); this.overPanel.setVisible(true); this.shareText.setText('分享這局，找朋友來挑戰').setVisible(true);
     }
 
     restart() {
+      this.spawnQueue = []; this.pendingSpawns = 0;
       for (const b of this.balls.slice()) this.removeBall(b);
       this.score = 0; this.ballsLeft = BALLS_PER_GAME; this.ironLeft = IRON_PER_GAME; this.ballType = 'pearl';
       this.gameOver = false; this.noDropUntil = this.time.now + 300;
       this.resetBonus();
-      this.msgText.setVisible(false); this.restartBg.setVisible(false); this.restartText.setVisible(false); this.switchText.setVisible(false); this.overPanel.setVisible(false);
+      if (this.machine && !this.tut) this.floatText('本局機關：' + this.machine.name + '\n' + this.machine.desc, W / 2, 640, 0xff8a5c, 34);
+      this.msgText.setVisible(false); this.restartBg.setVisible(false); this.restartText.setVisible(false); this.switchText.setVisible(false); this.overPanel.setVisible(false); this.shareText.setVisible(false);
       this.updateUI();
     }
 
@@ -681,8 +815,10 @@
           const extra = BALL_TYPES[ball.type].gravity - 1;
           if (extra && ball.stick <= 0) ball.body.force.y += ball.body.mass * GRAVITY * 0.001 * extra;
         }
+        this.moveSlider();
         this.matter.world.step(STEP_MS); this.acc -= STEP_MS; steps++;
         for (const ball of this.balls) if (ball.type === 'iron') this.ironPass(ball);
+        if (this.spawnQueue && this.spawnQueue.length) { this.runSpawns(); if (this.ballsLeft === 0 && this.balls.length === 0 && !this.tut && !this.gameOver) this.endGame(); }
       }
       if (steps === 12) this.acc = 0;   // 太卡就放掉落後的時間，不要越追越慢
 
@@ -755,6 +891,19 @@
         g.fillStyle(info.color, 0.4 + 0.15 * Math.sin(t * 6)).fillCircle(this.dropX, DROP_Y, info.r);
         g.lineStyle(2, info.hi, 0.5).strokeCircle(this.dropX, DROP_Y, info.r);
       }
+      // 機關：燈籠彈跳器、移動擋板
+      for (const bm of this.bumpers || []) {
+        bm.flash = Math.max(0, bm.flash - 0.06);
+        g.fillStyle(0xff5a3c, 0.18 + 0.3 * bm.flash).fillCircle(bm.x, bm.y, BUMPER_R + 10 + 6 * bm.flash);
+        g.fillStyle(lerpColor(0xd8402a, 0xffd27a, bm.flash)).fillCircle(bm.x, bm.y, BUMPER_R);
+        g.fillStyle(0xffd27a, 0.9).fillRect(bm.x - 6, bm.y - BUMPER_R - 4, 12, 6).fillRect(bm.x - 6, bm.y + BUMPER_R - 2, 12, 6);
+        g.lineStyle(2, 0xffe2a8, 0.6).strokeCircle(bm.x, bm.y, BUMPER_R - 6);
+      }
+      if (this.slider) {
+        const sp = this.slider.position;
+        g.fillStyle(0x7fd6a6).fillRoundedRect(sp.x - SLIDER_W / 2, sp.y - SLIDER_H / 2, SLIDER_W, SLIDER_H, 6);
+        g.fillStyle(0x1c1730, 0.35); for (let k = 0; k < 5; k++) g.fillRect(sp.x - SLIDER_W / 2 + 10 + k * 22, sp.y - SLIDER_H / 2 + 3, 10, SLIDER_H - 6);
+      }
       // 釘子：被撞到會亮、會放大；被鐵球撞倒時變暗壓扁
       for (const p of this.pegs) {
         if (p.down <= 0 && p.flash <= 0) continue;   // 正常狀態的釘子已經在底圖上
@@ -778,7 +927,7 @@
       }
       // 球：拖尾＋本體＋反光
       for (const ball of this.balls) {
-        const info = BALL_TYPES[ball.type], r = info.r, p = ball.body.position;
+        const info = BALL_TYPES[ball.type], r = ball.r || info.r, p = ball.body.position;
         ball.trail.forEach((q, k) => {
           const a = (k + 1) / (ball.trail.length + 1);
           g.fillStyle(info.color, 0.22 * a).fillCircle(q.x, q.y, r * (0.4 + 0.5 * a));
