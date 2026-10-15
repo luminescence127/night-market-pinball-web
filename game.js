@@ -118,7 +118,7 @@
     return 'data:audio/wav;base64,' + btoa(s);
   }
 
-  // Matter 0.19 的 getVelocity 是「每 1/60 秒走幾像素」，跟物理步長無關
+  // Matter 0.20（Phaser 3.90 內建）的 getVelocity 是「每 1/60 秒走幾像素」，跟物理步長無關（10/15 實測：自由落體 1 秒後為 25，即 1500 px/s）
   const vel = (b) => (Phaser.Physics.Matter.Matter.Body.getVelocity ? Phaser.Physics.Matter.Matter.Body.getVelocity(b) : b.velocity);
 
   class Pinball extends Phaser.Scene {
@@ -142,6 +142,7 @@
       this.buildWalls();
       this.buildPegs();
       this.buildPockets();
+      this.bakeBoard();
       this.buildUI();
       this.updateUI();
 
@@ -186,6 +187,28 @@
           this.pegs.push(peg);
         }
       }
+    }
+
+    // 不會動的部分（台子、正常狀態的釘子、洞、隔板）只畫一次、烤成一張貼圖；每格只畫會動的東西（2026-10-15 效能研究建議）
+    bakeBoard() {
+      const b = this.make.graphics({ x: 0, y: 0, add: false });
+      b.fillStyle(C.board).fillRect(WALL, 90, W - WALL * 2, FLOOR_Y - 90);
+      b.fillStyle(C.edge).fillRect(0, 90, WALL, FLOOR_Y - 90).fillRect(W - WALL, 90, WALL, FLOOR_Y - 90).fillRect(0, FLOOR_Y, W, H - FLOOR_Y);
+      for (const p of this.pegs) b.fillStyle(C.peg).fillCircle(p.x, p.y, PEG_R);
+      const pw = this.pocketWidth();
+      for (let i = 0; i < POCKETS.length; i++) {
+        const c = C.pockets[i], rx = WALL + pw * i + 4;
+        b.fillStyle(c, 0.12).fillRect(rx, POCKET_TOP + 20, pw - 8, FLOOR_Y - POCKET_TOP - 20);
+        b.fillStyle(c).fillRect(rx, FLOOR_Y - 8, pw - 8, 8);
+      }
+      for (let i = 1; i < POCKETS.length; i++) {
+        const x = WALL + pw * i;
+        b.fillStyle(C.edge).fillRect(x - 3, POCKET_TOP, 6, FLOOR_Y - POCKET_TOP);
+        b.fillStyle(lerpColor(C.edge, 0xffffff, 0.2)).fillCircle(x, POCKET_TOP, 6);
+      }
+      b.generateTexture('board', W, H);
+      b.destroy();
+      this.add.image(0, 0, 'board').setOrigin(0).setDepth(-1);
     }
 
     pocketWidth() { return (W - WALL * 2) / POCKETS.length; }
@@ -351,11 +374,16 @@
       }
     }
 
+    // 浮字重複使用（每個 Text 都有自己的 canvas，iOS 有 canvas 總記憶體上限；2026-10-15 效能研究建議）
     floatText(text, x, y, color, size) {
-      const t = this.add.text(x, y, text, { fontFamily: FONT, fontSize: Math.round(size) + 'px', color: hex(color), stroke: '#000000', strokeThickness: 6, resolution: 2 }).setOrigin(0.5).setDepth(15).setScale(0.6);
+      this.textPool = this.textPool || [];
+      let t = this.textPool.find((o) => !o.active);
+      if (!t) { t = this.add.text(0, 0, '', { fontFamily: FONT, stroke: '#000000', strokeThickness: 6, resolution: 2 }).setOrigin(0.5).setDepth(15); this.textPool.push(t); }
+      this.tweens.killTweensOf(t);
+      t.setActive(true).setVisible(true).setAlpha(1).setScale(0.6).setPosition(x, y).setText(text).setFontSize(Math.round(size)).setColor(hex(color));
       this.tweens.add({ targets: t, scale: 1, duration: 180, ease: 'Back.Out' });
       this.tweens.add({ targets: t, y: y - 90, duration: 900, ease: 'Sine.Out' });
-      this.tweens.add({ targets: t, alpha: 0, duration: 500, delay: 450, onComplete: () => t.destroy() });
+      this.tweens.add({ targets: t, alpha: 0, duration: 500, delay: 450, onComplete: () => t.setActive(false).setVisible(false) });
     }
 
     // ───────────── 每格更新與繪製 ─────────────
@@ -415,9 +443,6 @@
     draw() {
       const g = this.g, t = this.time0;
       g.clear();
-      // 台子
-      g.fillStyle(C.board).fillRect(WALL, 90, W - WALL * 2, FLOOR_Y - 90);
-      g.fillStyle(C.edge).fillRect(0, 90, WALL, FLOOR_Y - 90).fillRect(W - WALL, 90, WALL, FLOOR_Y - 90).fillRect(0, FLOOR_Y, W, H - FLOOR_Y);
       // 頂端一串夜市燈泡，慢慢閃
       const n = 14;
       for (let i = 0; i < n; i++) {
@@ -435,8 +460,10 @@
       }
       // 釘子：被撞到會亮、會放大；被鐵球撞倒時變暗壓扁
       for (const p of this.pegs) {
+        if (p.down <= 0 && p.flash <= 0) continue;   // 正常狀態的釘子已經在底圖上
         if (p.down > 0) {
           const back = 1 - p.down / IRON_KNOCK_TIME;
+          g.fillStyle(C.board).fillCircle(p.x, p.y, PEG_R + 1);   // 先蓋掉底圖上的釘子
           g.fillStyle(C.peg, 0.25 + 0.5 * back).fillEllipse(p.x, p.y + 4, PEG_R * 2.6, PEG_R * 2 * (0.4 + 0.6 * back));
           continue;
         }
@@ -447,14 +474,10 @@
       const pw = this.pocketWidth();
       for (let i = 0; i < POCKETS.length; i++) {
         const c = C.pockets[i], f = this.pocketFlash[i];
+        if (f <= 0) continue;   // 平常的樣子已經在底圖上
         const rx = WALL + pw * i + 4, ry = POCKET_TOP + 20, rw = pw - 8, rh = FLOOR_Y - POCKET_TOP - 20;
-        g.fillStyle(c, 0.12 + 0.35 * f).fillRect(rx, ry, rw, rh);
+        g.fillStyle(c, 0.35 * f).fillRect(rx, ry, rw, rh);
         g.fillStyle(lerpColor(c, 0xffffff, f)).fillRect(rx, FLOOR_Y - 8, rw, 8);
-      }
-      for (let i = 1; i < POCKETS.length; i++) {
-        const x = WALL + pw * i;
-        g.fillStyle(C.edge).fillRect(x - 3, POCKET_TOP, 6, FLOOR_Y - POCKET_TOP);
-        g.fillStyle(lerpColor(C.edge, 0xffffff, 0.2)).fillCircle(x, POCKET_TOP, 6);
       }
       // 球：拖尾＋本體＋反光
       for (const ball of this.balls) {

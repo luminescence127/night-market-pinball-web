@@ -8,14 +8,44 @@
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
-  #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#8f86b3;font:16px "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif}
+  #loading{position:fixed;inset:0;z-index:10;background:#120f1f;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;color:#8f86b3;font:16px "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif}
+  #retry{display:none;font:inherit;color:#1c1730;background:#ffc94d;border:0;border-radius:10px;padding:12px 22px;min-height:44px}
+  #ver{position:fixed;right:6px;bottom:4px;color:#4b4370;font:11px monospace;pointer-events:none;z-index:5}
 </style>
 </head>
 <body>
-<div id="loading">載入中…</div>
+<div id="loading"><span id="msg">載入中…</span><button id="retry" type="button">點一下重試</button></div>
 <div id="game"></div>
-<script src="vendor/phaser.min.js?v=20261015211423"></script>
-<script>document.getElementById('loading').remove();</script>
-<script src="game.js?v=20261015211423"></script>
+<div id="ver"></div>
+<script>
+// 版本號：發佈腳本會把 20261015215824 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角，回報問題時看得到是哪一版。
+// 載入：依序載入 Phaser 與遊戲程式；失敗（例如 iPhone 切到背景時下載被中斷）會自動重試，
+// 回到前景時也會再試；重試用完就顯示「點一下重試」（2026-10-15 效能研究建議）。
+(function () {
+  var VER = '20261015215824';
+  document.getElementById('ver').textContent = VER === '__VER' + '__' ? 'dev' : 'v' + VER;
+  var files = ['vendor/phaser.min.js', 'game.js'];
+  var msg = document.getElementById('msg'), retry = document.getElementById('retry');
+  var i = 0, tries = 0, busy = false;
+  function next() {
+    if (i >= files.length) { document.getElementById('loading').remove(); return; }
+    busy = true;
+    var s = document.createElement('script');
+    s.src = files[i] + (VER.indexOf('__') === 0 ? '' : '?v=' + VER);
+    s.onload = function () { busy = false; i++; tries = 0; next(); };
+    s.onerror = function () {
+      busy = false; s.remove(); tries++;
+      if (tries < 3) { msg.textContent = '網路不穩，重新載入中…（第 ' + (tries + 1) + ' 次）'; setTimeout(function () { if (!document.hidden) next(); }, 1500); }
+      else { msg.textContent = '載入失敗，網路可能不穩'; retry.style.display = 'block'; }
+    };
+    document.body.appendChild(s);
+  }
+  retry.onclick = function () { retry.style.display = 'none'; msg.textContent = '載入中…'; tries = 0; next(); };
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && !busy && i < files.length && retry.style.display !== 'block') setTimeout(next, 500);
+  });
+  next();
+})();
+</script>
 </body>
 </html>
