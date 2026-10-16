@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#120f1f">
 <title>夜市彈珠台</title>
-<link rel="preload" href="vendor/phaser-lite.js?v=20261016091007" as="script">
+<link rel="preload" href="vendor/phaser-lite.js?v=20261016093752" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
@@ -15,8 +15,9 @@
   #start label{font-size:14px;color:#8f86b3;align-self:center}
   #name{font-family:inherit;font-size:20px;width:min(260px,80vw);padding:10px 12px;border-radius:10px;border:2px solid #3a2f5c;background:#1c1730;color:#fff;text-align:center;-webkit-user-select:text;user-select:text}
   #name:focus{outline:none;border-color:#ffc94d}
-  #go{font-family:inherit;font-size:22px;font-weight:700;color:#1c1730;background:#ffc94d;border:0;border-radius:12px;padding:12px 46px;min-height:52px}
-  #go[disabled]{opacity:.6}
+  #stall,#go.main{font-family:inherit;font-size:22px;font-weight:700;color:#1c1730;background:#ffc94d;border:0;border-radius:12px;padding:12px 46px;min-height:52px}
+  #go{font-family:inherit;font-size:15px;color:#e9e4ff;background:#2a2340;border:1px solid #3a2f5c;border-radius:20px;padding:8px 18px;min-height:40px}
+  #go[disabled],#stall[disabled]{opacity:.6}
   #people{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:320px}
   #people button{font-family:inherit;font-size:14px;color:#e9e4ff;background:#2a2340;border:1px solid #3a2f5c;border-radius:16px;padding:6px 12px;min-height:36px}
   #rec{min-height:2.6em;text-align:center;color:#c9c1ee;font-size:14px;line-height:1.5}
@@ -29,7 +30,6 @@
   #tutorial{font-family:inherit;font-size:15px;color:#ffc94d;background:transparent;border:1px solid #5a4a20;border-radius:20px;padding:8px 18px;min-height:40px}
   #challenge{display:none;max-width:320px;text-align:center;background:#2a2340;border:2px solid #ffc94d;border-radius:12px;padding:10px 14px;color:#fff;font-size:16px;line-height:1.5}
   #daily{font-family:inherit;font-size:16px;color:#1c1730;background:#7fd6a6;border:0;border-radius:12px;padding:10px 20px;min-height:44px}
-  #stall{font-family:inherit;font-size:17px;color:#1c1730;background:#ff9f5a;border:0;border-radius:12px;padding:10px 20px;min-height:48px;font-weight:700}
   #shelfBtn{display:none;font-family:inherit;font-size:15px;color:#e9e4ff;background:#2a2340;border:1px solid #3a2f5c;border-radius:20px;padding:8px 18px;min-height:40px}
   #shelf{display:none;max-width:340px;background:#1c1730;border:1px solid #3a2f5c;border-radius:12px;padding:12px;text-align:center}
   #shelf .tk{color:#ffc94d;font-weight:700;margin-bottom:8px}
@@ -50,8 +50,8 @@
   <input id="name" maxlength="12" autocomplete="off" enterkeyhint="go" placeholder="輸入名字">
   <div id="people"></div>
   <div id="rec"></div>
-  <button id="go" type="button">開始</button>
-  <button id="stall" type="button">🐟 撈金魚攤（新玩法試玩）</button>
+  <button id="stall" type="button">開始</button>
+  <button id="go" type="button">自由玩（拚總分）</button>
   <button id="daily" type="button">今日挑戰：大家玩同一局</button>
   <button id="tutorial" type="button">怎麼玩？看教學</button>
   <button id="shelfBtn" type="button">🎁 獎品櫃</button>
@@ -66,9 +66,9 @@
 // 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
 // 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
 // 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
-// 版本號：發佈腳本會把 20261016091007 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
+// 版本號：發佈腳本會把 20261016093752 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261016091007', DEV = VER.indexOf('__') === 0;
+  var VER = '20261016093752', DEV = VER.indexOf('__') === 0;
   document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
 
   // ── 紀錄 ──
@@ -165,10 +165,11 @@
   document.getElementById('shelfBtn').onclick = function () { var on = shelf.style.display === 'block'; if (!on) drawShelf(); shelf.style.display = on ? 'none' : 'block'; };
   nameEl.addEventListener('input', function () { if (shelf.style.display === 'block') drawShelf(); });
   nameEl.addEventListener('input', showRec);
-  nameEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { nameEl.blur(); go.click(); } });
+  // 按 Enter 等於按主按鈕：平常是清台，朋友挑戰時是「接受挑戰」
+  nameEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { nameEl.blur(); (friend ? go : stallBtn).click(); } });
   showRec(); showPeople();
   NM_cloud.top().catch(function () {});
-  window.NM_showStart = function () { showRec(); showPeople(); NM_cloud.top().catch(function () {}); start.style.display = 'flex'; go.disabled = false; go.textContent = '開始'; };
+  window.NM_showStart = function () { showRec(); showPeople(); NM_cloud.top().catch(function () {}); start.style.display = 'flex'; resetButtons(); };
 
   // ── 聲音：在「開始」這一下打開（game.js 的 Sound 會接手這個 AudioContext）──
   function unlockAudio() {
@@ -185,6 +186,9 @@
 
   // ── 開始 ──
   var ready = false, wantStart = false;
+  // 10/16 使用者定案：清台是遊戲本體，「開始」直接進清台；原本的拚總分降成「自由玩」
+  var stallBtn = document.getElementById('stall');
+  function resetButtons() { go.disabled = stallBtn.disabled = false; stallBtn.textContent = '開始'; go.textContent = friend ? '接受挑戰' : '自由玩（拚總分）'; }
   var wantTutorial = false;
   // ── 挑戰（2026-10-15）：朋友分享的連結 ?c=種子&from=名字&s=分數 → 同一局；今日挑戰 → 用台灣日期當種子，大家同一局 ──
   var q = new URLSearchParams(location.search), friend = null, mode = 'free';
@@ -193,7 +197,7 @@
     var box = document.getElementById('challenge');
     box.textContent = friend.from + ' 挑戰你！他打了 ' + friend.score + ' 分\n同一局，你打得贏嗎？';
     box.style.whiteSpace = 'pre-line'; box.style.display = 'block';
-    go.textContent = '接受挑戰';
+    go.textContent = '接受挑戰'; go.classList.add('main');
   }
   function dailySeed() { var t = today(), h = 2166136261; for (var k = 0; k < t.length; k++) { h ^= t.charCodeAt(k); h = Math.imul(h, 16777619); } return (h >>> 0) % 2147483646 + 1; }
   function begin() {
@@ -205,14 +209,14 @@
     if (mode === 'stall') { window.NM_mode = 'stall'; window.NM_beginStall(n); return; }
     window.NM_begin(n, wantTutorial); wantTutorial = false;
   }
-  document.getElementById('stall').onclick = function () { mode = 'stall'; go.onclick(); };
+  stallBtn.onclick = function () { mode = 'stall'; go.onclick(); };
   document.getElementById('daily').onclick = function () { mode = 'daily'; go.onclick(); };
   // 看教學：第一次玩會自動進教學，這個按鈕是給想再看一次的人
   document.getElementById('tutorial').onclick = function () { mode = 'free'; wantTutorial = true; go.onclick(); };
   go.onclick = function (e) {
     if (e) mode = 'free';
     unlockAudio();
-    if (ready) begin(); else { wantStart = true; go.disabled = true; go.textContent = '載入中…'; }
+    if (ready) begin(); else { wantStart = true; go.disabled = stallBtn.disabled = true; (mode === 'stall' ? stallBtn : go).textContent = '載入中…'; }
   };
 
   // ── 載入：依序載入 Phaser 與遊戲程式；失敗自動重試，回到前景再試，用完顯示「點一下重試」──
