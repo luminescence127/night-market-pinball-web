@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-title" content="夜市彈珠台">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>夜市彈珠台</title>
-<link rel="preload" href="vendor/phaser-lite.js?v=20261016120731" as="script">
+<link rel="preload" href="vendor/phaser-lite.js?v=20261016125553" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
@@ -85,9 +85,9 @@
 // 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
 // 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
 // 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
-// 版本號：發佈腳本會把 20261016120731 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
+// 版本號：發佈腳本會把 20261016125553 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261016120731', DEV = VER.indexOf('__') === 0;
+  var VER = '20261016125553', DEV = VER.indexOf('__') === 0;
   document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
 
   // ── 紀錄 ──
