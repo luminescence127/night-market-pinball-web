@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-title" content="夜市彈珠台">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>夜市彈珠台</title>
-<link rel="preload" href="vendor/phaser-lite.js?v=20261016125553" as="script">
+<link rel="preload" href="vendor/phaser-lite.js?v=20261016130826" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
@@ -51,12 +51,14 @@
   #rating{margin:0;font-size:12px;color:#8f86b3;display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;text-align:center}
   #rating .badge{font-weight:700;color:#1c1730;background:#ffc94d;border-radius:4px;padding:1px 6px}
   #privacy{font-size:12px;color:#8f86b3;padding:10px 4px;min-height:44px;display:inline-flex;align-items:center}
+  #authorTag{margin:0;font-size:13px;color:#1c1730;background:#9be37a;border-radius:8px;padding:2px 10px}
   #a2hs{margin:0;max-width:320px;font-size:13px;color:#c9c1ee;background:#1c1730;border:1px dashed #3a2f5c;border-radius:10px;padding:8px 12px;text-align:center}
 </style>
 </head>
 <body>
 <div id="start">
   <h1>夜市彈珠台</h1>
+  <p id="authorTag" hidden>🔧 作者模式（全部關卡已解鎖）</p>
   <p class="sub">珍珠會彈、麻糬會黏、鐵球撞得倒釘子</p>
   <!-- 遊戲分級（使用者 10/16 選「保守標輔十二」，不寫信問）：遊戲軟體分級管理辦法第 11、13 條，標在起始網頁明顯處＋防賭博警語 -->
   <p id="rating"><span class="badge">輔12級</span>本遊戲為益智娛樂類，不得利用遊戲賭博</p>
@@ -85,15 +87,18 @@
 // 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
 // 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
 // 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
-// 版本號：發佈腳本會把 20261016125553 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
+// 版本號：發佈腳本會把 20261016130826 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261016125553', DEV = VER.indexOf('__') === 0;
+  var VER = '20261016130826', DEV = VER.indexOf('__') === 0;
   document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
 
   // ── 紀錄 ──
   var REC_KEY = 'nm_records', NAME_KEY = 'nm_name';
   function load(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 私密瀏覽等存不了就算了 */ } }
+  // 作者模式（10/16 使用者：「能不能給一個後門是作者可以快速跳到某些概念關卡」）：網址加 ?author=manylives 打開、?author=off 關掉。
+  // 打開後記在這支手機：所有區與關卡都解鎖、選關畫面多一排區號直接跳；這支手機玩的局不送匿名數據、問卷不自動跳。
+  (function () { var m = /[?&]author=([^&]*)/.exec(location.search); if (!m) return; try { if (m[1] === 'manylives') localStorage.setItem('nm_author', 'true'); else localStorage.removeItem('nm_author'); } catch (e) {} })();
   function today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   // ── 獎品櫃（F7，2026-10-15）：每 100 分 1 張彩票，換夜市獎品。圖先用表情符號，風格定了再換成美術 ──
   var TICKET_PER = 100;
@@ -172,6 +177,7 @@
   window.NM_core = { load: load, save: save, cloud: cloud, sid: sid, VER: VER, showRec: showRec, showPeople: showPeople };
   (function () { var s = document.createElement('script'); s.src = 'extras.js' + (DEV ? '' : '?v=' + VER); s.async = true; document.body.appendChild(s); })();
 
+  if (load('nm_author', false)) document.getElementById('authorTag').hidden = false;
   // 「加到主畫面」提示：iPhone 的 Safari 太久沒打開會清掉網站資料，加到主畫面就不會（10/16 研究 G1、G23）
   (function () {
     var ios = /iPhone|iPad|iPod/.test(navigator.userAgent), standalone = navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
