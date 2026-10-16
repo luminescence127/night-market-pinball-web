@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#120f1f">
 <title>夜市彈珠台</title>
-<link rel="preload" href="vendor/phaser-lite.js?v=20261016095031" as="script">
+<link rel="preload" href="vendor/phaser-lite.js?v=20261016102327" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
@@ -39,6 +39,24 @@
   #shelf button.own{border-color:#ffc94d}
   #shelf button[disabled]{opacity:.45}
   #ver{position:fixed;right:6px;bottom:4px;color:#4b4370;font:11px monospace;pointer-events:none;z-index:11}
+  /* 玩家問卷（10/16）：跟給作者的審閱頁同一套做法——一題一塊、按鈕作答、每題可以補一句、最後自由填寫 */
+  #fbBtn{font-family:inherit;font-size:15px;color:#c9c1ee;background:transparent;border:1px solid #3a2f5c;border-radius:20px;padding:8px 18px;min-height:40px}
+  #fb{display:none;position:fixed;inset:0;z-index:30;background:rgba(10,8,20,.82);overflow-y:auto;touch-action:pan-y;-webkit-user-select:text;user-select:text}
+  #fb .panel{max-width:420px;margin:20px auto 40px;background:#1c1730;border:1px solid #3a2f5c;border-radius:14px;padding:18px 16px;color:#e9e4ff;font:16px/1.6 "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;box-sizing:border-box;width:calc(100% - 32px)}
+  #fb h2{margin:0 0 4px;font-size:22px;color:#ffc94d}
+  #fb .ctx{color:#8f86b3;font-size:14px;margin:0 0 12px}
+  #fb .q{border-top:1px solid #2f2750;padding:12px 0}
+  #fb .q h3{margin:0 0 8px;font-size:17px}
+  #fb .q .d{color:#8f86b3;font-size:13px;margin:-4px 0 8px}
+  #fb .opts{display:flex;flex-wrap:wrap;gap:8px}
+  #fb button{font:inherit;font-size:15px;min-height:44px;padding:8px 14px;border-radius:10px;border:1px solid #3a2f5c;background:#2a2340;color:#e9e4ff}
+  #fb button[aria-pressed="true"]{background:#4a3d72;border-color:#ffc94d;color:#ffc94d;font-weight:700}
+  #fb .more{background:transparent;border:0;color:#8fb7d6;font-size:14px;min-height:36px;padding:4px 0}
+  #fb input,#fb textarea{width:100%;box-sizing:border-box;font:inherit;font-size:16px;color:#fff;background:#120f1f;border:1px solid #3a2f5c;border-radius:8px;padding:8px 10px;margin-top:6px}
+  #fb textarea{min-height:90px}
+  #fb .row{display:flex;gap:10px;margin-top:14px;position:sticky;bottom:0;background:#1c1730;padding:10px 0 4px}
+  #fb .send{flex:1;background:#ffc94d;color:#1c1730;border:0;font-weight:700;font-size:18px}
+  #fb .msg{min-height:1.4em;color:#9be37a;font-size:15px;margin-top:8px}
 </style>
 </head>
 <body>
@@ -54,6 +72,7 @@
   <button id="go" type="button">自由玩（拚總分）</button>
   <button id="daily" type="button">今日挑戰：大家玩同一局</button>
   <button id="tutorial" type="button">怎麼玩？看教學</button>
+  <button id="fbBtn" type="button">📝 給做遊戲的人意見</button>
   <button id="shelfBtn" type="button">🎁 獎品櫃</button>
   <div id="shelf"></div>
   <div id="board"></div>
@@ -61,14 +80,15 @@
   <button id="retry" type="button">點一下重試</button>
 </div>
 <div id="game"></div>
+<div id="fb" role="dialog" aria-modal="true" aria-labelledby="fbTitle"><div class="panel"></div></div>
 <div id="ver"></div>
 <script>
 // 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
 // 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
 // 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
-// 版本號：發佈腳本會把 20261016095031 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
+// 版本號：發佈腳本會把 20261016102327 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261016095031', DEV = VER.indexOf('__') === 0;
+  var VER = '20261016102327', DEV = VER.indexOf('__') === 0;
   document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
 
   // ── 紀錄 ──
@@ -129,6 +149,74 @@
     top: function () { return cloud('/top').then(function (d) { drawBoard(d); return d; }); },
   };
   function sid() { var s = load('nm_sid', ''); if (!s) { s = Math.random().toString(36).slice(2, 12); save('nm_sid', s); } return s; }
+
+  // ── 玩家問卷（2026-10-16 使用者：「幫我設計問卷讓玩家可以在遊戲上自由填寫嗎 就像寫給我的彙報一樣」）──
+  // 一題一塊、按鈕作答、每題可「補一句」、最後自由填寫；全部選填。不送名字，只送隨機手機代號與剛剛玩的關卡。
+  // 結果看：node tools/feedback_report.cjs（加 --staging 看測試用）
+  var FB_QS = [
+    { id: 'F1', q: '剛剛這關好玩嗎？', o: ['😆 很好玩', '🙂 還可以', '😐 有點無聊'] },
+    { id: 'F2', q: '難度？', o: ['太簡單', '剛好', '太難'] },
+    { id: 'F3', q: '打輸的時候，覺得是？', d: '沒輸過可以跳過', o: ['自己哪一顆打錯', '一半一半', '運氣不好'] },
+    { id: 'F4', q: '現在最想？', o: ['再打一次這關', '玩下一關', '先休息'] },
+    { id: 'F5', q: '最喜歡哪個東西？', o: ['金魚', '連鎖爆', '爆米花', '硬殼', '數字燈籠', '撈網', '老闆招牌', '三種彈珠'] },
+  ];
+  var FB_KEY = 'nm_fb', fbEl = document.getElementById('fb'), fbCtx = null;
+  function fbDevice() { var u = navigator.userAgent; return /iPhone|iPad|iPod/.test(u) ? 'ios' : /Android/.test(u) ? 'android' : 'desktop'; }
+  function esc(s) { return String(s).replace(/[<>&"]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]; }); }
+  window.NM_feedback = function (ctx) {
+    fbCtx = ctx || {};
+    var where = fbCtx.level ? '剛剛玩：' + fbCtx.level + ' ' + (fbCtx.levelName || '') + (fbCtx.result === 'clear' ? '（過關 ' + '★'.repeat(fbCtx.stars || 0) + '）' : fbCtx.result === 'fail' ? '（沒過）' : '') : '隨時都可以填，每題都可以跳過';
+    var h = '<h2 id="fbTitle">給做遊戲的人：30 秒問卷</h2><p class="ctx">' + esc(where) + '</p>';
+    FB_QS.forEach(function (x) {
+      h += '<div class="q" data-q="' + x.id + '"><h3>' + esc(x.q) + '</h3>' + (x.d ? '<p class="d">' + esc(x.d) + '</p>' : '') + '<div class="opts">';
+      x.o.forEach(function (o) { h += '<button type="button" data-v="' + esc(o) + '" aria-pressed="false">' + esc(o) + '</button>'; });
+      h += '</div><button type="button" class="more">＋補一句</button><input type="text" maxlength="200" placeholder="想多說的（選填）" hidden></div>';
+    });
+    h += '<div class="q"><h3>還有什麼想跟做遊戲的人說？</h3><p class="d">哪裡卡住、想要什麼新玩法、哪裡看不懂，都可以寫（選填）</p><textarea id="fbText" maxlength="500"></textarea></div>';
+    h += '<div class="row"><button type="button" class="send">送出</button><button type="button" class="close">下次再說</button></div><div class="msg" role="status"></div>';
+    fbEl.querySelector('.panel').innerHTML = h;
+    fbEl.style.display = 'block'; fbEl.scrollTop = 0;
+    gameInput(false);   // 問卷開著時遊戲不收觸控：iPhone 上遊戲的觸控處理會把問卷捲回最上面，按「送出」放開時落在別的按鈕（10/16 自動測試抓到）
+    var st = load(FB_KEY, {}); st.shown = (st.shown || 0) + 1; if (fbCtx.zone) { st.asked = st.asked || {}; st.asked[fbCtx.zone] = 1; } save(FB_KEY, st);
+  };
+  // 自動問一次：每一區最多一次（玩完那一區最後一關、或那一區打滿 4 局）；填過就不再自動跳
+  window.NM_feedbackShouldAsk = function (zone, endsInZone, lastLevel) {
+    var st = load(FB_KEY, {});
+    return !(st.asked && st.asked[zone]) && (lastLevel || endsInZone >= 4);
+  };
+  function gameInput(on) { try { var g = window.__game && window.__game.game; if (g && g.input) g.input.enabled = on; } catch (e) {} }
+  function fbClose() { fbEl.style.display = 'none'; gameInput(true); if (fbCtx && fbCtx.onClose) fbCtx.onClose(); }
+  fbEl.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) { if (e.target === fbEl) fbClose(); return; }
+    var q = b.closest('.q');
+    if (b.classList.contains('more')) { var inp = q.querySelector('input'); inp.hidden = false; inp.focus(); b.hidden = true; return; }
+    if (b.classList.contains('close')) { fbClose(); return; }
+    if (b.classList.contains('send')) {
+      var answers = {}, notes = {};
+      fbEl.querySelectorAll('.q[data-q]').forEach(function (el) {
+        var on = el.querySelector('button[aria-pressed="true"]'), inp = el.querySelector('input');
+        if (on) answers[el.dataset.q] = on.dataset.v;
+        if (inp && inp.value.trim()) notes[el.dataset.q] = inp.value.trim();
+      });
+      var text = document.getElementById('fbText').value.trim(), msg = fbEl.querySelector('.msg');
+      if (!Object.keys(answers).length && !Object.keys(notes).length && !text) { msg.style.color = '#ffb36b'; msg.textContent = '還沒填任何一題喔'; return; }
+      b.disabled = true; msg.style.color = '#c9c1ee'; msg.textContent = '送出中…';
+      var body = { sid: sid(), stall: fbCtx.zone || null, level: fbCtx.level || null, result: fbCtx.result || null, stars: fbCtx.stars, answers: answers, notes: notes, text: text, device: fbDevice(), ver: VER };
+      cloud('/feedback', body).then(function (d) {
+        if (!d || !d.ok) throw new Error(d && d.error);
+        var st = load(FB_KEY, {}); st.sent = (st.sent || 0) + 1; save(FB_KEY, st);
+        msg.style.color = '#9be37a'; msg.textContent = '收到了，謝謝你！🙏';
+        setTimeout(fbClose, 1200);
+      }).catch(function () { b.disabled = false; msg.style.color = '#ffb36b'; msg.textContent = '沒送出去（網路不穩或按太快），等一下再按一次'; });
+      return;
+    }
+    if (q && b.dataset.v != null) {   // 單選：再按一次取消
+      var was = b.getAttribute('aria-pressed') === 'true';
+      q.querySelectorAll('.opts button').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+      b.setAttribute('aria-pressed', was ? 'false' : 'true');
+    }
+  });
+  document.getElementById('fbBtn').onclick = function () { window.NM_feedback({}); };
   function drawBoard(d) {
     var el = document.getElementById('board'), me = nameEl.value.trim();
     function list(title, rows) {
