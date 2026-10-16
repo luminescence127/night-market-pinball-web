@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-title" content="夜市彈珠台">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>夜市彈珠台</title>
-<link rel="preload" href="vendor/phaser-lite.js?v=20261016130826" as="script">
+<link rel="preload" href="vendor/phaser-lite.js?v=20261016141710" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   #game{position:fixed;inset:0}
@@ -52,11 +52,13 @@
   #rating .badge{font-weight:700;color:#1c1730;background:#ffc94d;border-radius:4px;padding:1px 6px}
   #privacy{font-size:12px;color:#8f86b3;padding:10px 4px;min-height:44px;display:inline-flex;align-items:center}
   #authorTag{margin:0;font-size:13px;color:#1c1730;background:#9be37a;border-radius:8px;padding:2px 10px}
+  #mute{position:absolute;top:max(8px,env(safe-area-inset-top));right:8px;font-size:24px;width:48px;height:48px;padding:0;background:#2a2340;border:1px solid #3a2f5c;border-radius:12px}
   #a2hs{margin:0;max-width:320px;font-size:13px;color:#c9c1ee;background:#1c1730;border:1px dashed #3a2f5c;border-radius:10px;padding:8px 12px;text-align:center}
 </style>
 </head>
 <body>
 <div id="start">
+  <button id="mute" type="button" aria-label="聲音開關"></button>
   <h1>夜市彈珠台</h1>
   <p id="authorTag" hidden>🔧 作者模式（全部關卡已解鎖）</p>
   <p class="sub">珍珠會彈、麻糬會黏、鐵球撞得倒釘子</p>
@@ -87,9 +89,9 @@
 // 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
 // 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
 // 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
-// 版本號：發佈腳本會把 20261016130826 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
+// 版本號：發佈腳本會把 20261016141710 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261016130826', DEV = VER.indexOf('__') === 0;
+  var VER = '20261016141710', DEV = VER.indexOf('__') === 0;
   document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
 
   // ── 紀錄 ──
@@ -178,6 +180,11 @@
   (function () { var s = document.createElement('script'); s.src = 'extras.js' + (DEV ? '' : '?v=' + VER); s.async = true; document.body.appendChild(s); })();
 
   if (load('nm_author', false)) document.getElementById('authorTag').hidden = false;
+  // 聲音開關（10/16）：跟遊戲裡的喇叭同一個設定 nm_mute（遊戲載入後由 src/sound.js 的 Sound 接手）
+  var muteEl = document.getElementById('mute');
+  function drawMute() { muteEl.textContent = load('nm_mute', false) ? '🔇' : '🔊'; }
+  muteEl.onclick = function () { var m = !load('nm_mute', false); if (window.__sound) __sound.setMuted(m); else save('nm_mute', m); drawMute(); };
+  drawMute();
   // 「加到主畫面」提示：iPhone 的 Safari 太久沒打開會清掉網站資料，加到主畫面就不會（10/16 研究 G1、G23）
   (function () {
     var ios = /iPhone|iPad|iPod/.test(navigator.userAgent), standalone = navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
@@ -223,7 +230,7 @@
   nameEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { nameEl.blur(); (friend ? go : stallBtn).click(); } });
   showRec(); showPeople();
   NM_cloud.top().catch(function () {});
-  window.NM_showStart = function () { showRec(); showPeople(); NM_cloud.top().catch(function () {}); start.style.display = 'flex'; resetButtons(); };
+  window.NM_showStart = function () { drawMute(); showRec(); showPeople(); NM_cloud.top().catch(function () {}); start.style.display = 'flex'; resetButtons(); };
 
   // ── 聲音：在「開始」這一下打開（game.js 的 Sound 會接手這個 AudioContext）──
   function unlockAudio() {
