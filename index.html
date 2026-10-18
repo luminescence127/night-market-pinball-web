@@ -12,10 +12,16 @@
 <meta name="apple-mobile-web-app-title" content="夜市彈珠台">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>夜市彈珠台</title>
-<link rel="preload" href="vendor/phaser-lite.js?v=20261018165239" as="script">
+<link rel="preload" href="vendor/phaser-lite.js?v=20261018171029" as="script">
 <style>
   html,body{margin:0;height:100%;background:#120f1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
-  #game{position:fixed;inset:0}
+  #game{position:fixed;left:0;right:0;top:env(safe-area-inset-top,0);bottom:env(safe-area-inset-bottom,0)}
+  #rot{display:none;position:fixed;inset:0;z-index:60;background:#120f1f;color:#ffc94d;font:20px/1.6 sans-serif;align-items:center;justify-content:center;text-align:center}
+  @media (orientation:landscape) and (max-height:500px){#rot{display:flex}}
+  #setBtn{position:absolute;top:max(8px,env(safe-area-inset-top));left:8px;font-size:24px;width:48px;height:48px;padding:0;background:#2a2340;border:1px solid #3a2f5c;border-radius:12px}
+  #more{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:min(340px,92vw)}
+  #more button{width:100%;font-size:14px;padding:8px 6px;border-radius:12px}
+  #bkTip{margin:0;max-width:320px;font-size:14px;color:#1c1730;background:#9be37a;border-radius:10px;padding:8px 12px;text-align:center}
   #start{position:fixed;inset:0;z-index:10;background:#120f1f;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:safe center;overflow-y:auto;touch-action:pan-y;padding:24px 16px;box-sizing:border-box;color:#e9e4ff;font:16px "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;touch-action:manipulation}
   #start h1{margin:0;font-size:34px;color:#ffc94d;letter-spacing:.08em}
   #start .sub{margin:0;color:#8f86b3;font-size:14px}
@@ -59,23 +65,28 @@
 <body>
 <div id="start">
   <button id="mute" type="button" aria-label="聲音開關"></button>
+  <button id="setBtn" type="button" aria-label="設定">⚙️</button>
   <h1>夜市彈珠台</h1>
   <p id="authorTag" hidden>🔧 作者模式（全部關卡已解鎖）</p>
   <p class="sub">珍珠會彈、麻糬會黏、鐵球撞得倒釘子</p>
   <!-- 遊戲分級（使用者 10/16 選「保守標輔十二」，不寫信問）：遊戲軟體分級管理辦法第 11、13 條，標在起始網頁明顯處＋防賭博警語 -->
-  <p id="rating"><span class="badge">輔12級</span>本遊戲為益智娛樂類，不得利用遊戲賭博</p>
+  <p id="rating"><span class="badge">輔12級</span>本遊戲為益智娛樂類，不得利用遊戲賭博；請注意使用時間，避免沉迷</p>
   <p id="a2hs" hidden>📲 加到主畫面，進度比較不會不見：按 Safari 下面的「分享」→「加入主畫面」</p>
   <div id="challenge"></div>
-  <label for="name">你的名字</label>
+  <label for="name">選一個存檔，或輸入新名字</label>
+  <p id="bkTip" hidden></p>
   <input id="name" maxlength="12" autocomplete="off" enterkeyhint="go" placeholder="輸入名字">
   <div id="people"></div>
   <div id="rec"></div>
   <button id="stall" type="button">開始</button>
+  <!-- ⑧ 標題畫面整理（10/18）：「開始」最大，其他的收成兩欄小按鈕 -->
+  <div id="more">
   <button id="go" type="button">自由玩（拚總分）</button>
-  <button id="daily" type="button">今日挑戰：大家玩同一局</button>
-  <button id="tutorial" type="button">怎麼玩？看教學</button>
-  <button id="fbBtn" type="button">📝 給做遊戲的人意見</button>
-  <button id="bkBtn" type="button">💾 換手機／備份進度</button>
+  <button id="daily" type="button">今日挑戰</button>
+  <button id="tutorial" type="button">怎麼玩？</button>
+  <button id="bkBtn" type="button">💾 備份進度</button>
+  <button id="fbBtn" type="button">📝 給意見</button>
+  </div>
   <button id="shelfBtn" type="button">🎁 獎品櫃</button>
   <div id="shelf"></div>
   <div id="board"></div>
@@ -84,14 +95,15 @@
   <button id="retry" type="button">點一下重試</button>
 </div>
 <div id="game"></div>
+<div id="rot">📱<br>請把手機轉直的玩</div>
 <div id="ver"></div>
 <script>
 // 開始畫面（2026-10-15）：一打開網址就出現，不等遊戲引擎；輸入名字的同時引擎在背後下載。
 // 按「開始」那一下同時打開聲音（手機規定要先點過畫面才能出聲；之前第一次點才打開，前一兩顆球沒聲音）。
 // 紀錄存在這支手機（localStorage，每個名字分開：今日最高、歷史最高、最近 20 局），之後接 Cloudflare 排行榜。
-// 版本號：發佈腳本會把 20261018165239 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
+// 版本號：發佈腳本會把 20261018171029 換成發佈時間，用來讓手機拿到新檔，也顯示在右下角。
 (function () {
-  var VER = '20261018165239', DEV = VER.indexOf('__') === 0;
+  var VER = '20261018171029', DEV = VER.indexOf('__') === 0;
   document.getElementById('ver').textContent = DEV ? 'dev' : 'v' + VER;
 
   // ── 紀錄 ──
@@ -206,11 +218,13 @@
     var n = nameEl.value.trim(), r = n && NM_records.get(n);
     recEl.textContent = r ? '今日最高 ' + (r.daily[today()] || 0) + ' 分　歷史最高 ' + r.best + ' 分\n玩過 ' + r.games + ' 局' : (n ? '第一次玩，加油！' : '');
     recEl.style.whiteSpace = 'pre-line';
+    if (window.NM_bkTip) NM_bkTip();
   }
   function showPeople() {
     var names = Object.keys(NM_records.all()); people.innerHTML = '';
-    if (names.length < 2) return;
-    names.forEach(function (n) { var b = document.createElement('button'); b.type = 'button'; b.textContent = n; b.onclick = function () { nameEl.value = n; showRec(); }; people.appendChild(b); });
+    if (!names.length) return;
+    names.forEach(function (n) { var b = document.createElement('button'); b.type = 'button'; b.textContent = '📁 ' + n; b.onclick = function () { nameEl.value = n; showRec(); }; people.appendChild(b); });
+    var nb = document.createElement('button'); nb.type = 'button'; nb.textContent = '＋新玩家'; nb.onclick = function () { nameEl.value = ''; showRec(); nameEl.focus(); }; people.appendChild(nb);
   }
   var shelf = document.getElementById('shelf');
   function drawShelf() {
