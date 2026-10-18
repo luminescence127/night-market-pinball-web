@@ -143,9 +143,10 @@
   var setEl = document.getElementById('set'), delStep = 0;
   function setName() { return (document.getElementById('name').value || '').trim(); }
   function drawSet() {
-    var muted = C.load('nm_mute', false), vibe = C.load('nm_vibe', true), n = setName(), vib = !!navigator.vibrate;
+    var muted = C.load('nm_mute', false), music = C.load('nm_music', true) !== false, vibe = C.load('nm_vibe', true), n = setName(), vib = !!navigator.vibrate;
     setEl.querySelector('.panel').innerHTML = '<h2 id="setTitle" style="margin:0 0 8px;color:#ffc94d">⚙️ 設定</h2>' +
       '<div class="q tog"><span>🔊 音效</span><button type="button" data-k="mute" class="' + (muted ? '' : 'on') + '">' + (muted ? '關' : '開') + '</button></div>' +
+      '<div class="q tog"><span>🎵 背景音樂</span><button type="button" data-k="music" class="' + (music ? 'on' : '') + '">' + (music ? '開' : '關') + '</button></div>' +
       '<div class="q tog"><span>📳 震動' + (vib ? '' : '<br><small style="color:#8f86b3">這支手機的瀏覽器不支援（iPhone 都不支援）</small>') + '</span><button type="button" data-k="vibe" class="' + (vibe ? 'on' : '') + '">' + (vibe ? '開' : '關') + '</button></div>' +
       '<div class="q"><h3>關於</h3><p class="d">夜市彈珠台　版本 ' + (C.VER.indexOf('__') === 0 ? 'dev' : C.VER) + '<br>製作：Many Lives Works<br>聯絡：manylivesworks@gmail.com<br>使用的程式庫：Phaser 3（MIT 授權）、Matter.js（MIT 授權）<br>聲音都是程式即時合成，沒有用到外部素材。<br><a href="privacy.html">隱私權說明與使用規範</a></p></div>' +
       '<div class="q"><h3>刪除這個存檔</h3>' + (n ? '<p class="d">刪掉「' + esc(n) + '」在這支手機的星星、分數和紀錄（排行榜上的分數不會刪）。刪了就拿不回來。</p><div class="row"><button type="button" data-k="del" class="danger">' + (delStep ? '真的要刪「' + esc(n) + '」？再按一次確定' : '刪除「' + esc(n) + '」的存檔') + '</button></div>' : '<p class="d">先在開始畫面選一個存檔。</p>') + '</div>' +
@@ -157,6 +158,7 @@
     if (b.classList.contains('close')) { setEl.style.display = 'none'; return; }
     var k = b.dataset.k;
     if (k === 'mute') { document.getElementById('mute').click(); drawSet(); }
+    else if (k === 'music') { var on = !(C.load('nm_music', true) !== false); if (window.__sound) window.__sound.setMusic(on); else C.save('nm_music', on); drawSet(); }
     else if (k === 'vibe') { C.save('nm_vibe', !C.load('nm_vibe', true)); if (C.load('nm_vibe', true) && navigator.vibrate) navigator.vibrate(30); drawSet(); }
     else if (k === 'del') {
       if (!delStep) { delStep = 1; drawSet(); return; }
